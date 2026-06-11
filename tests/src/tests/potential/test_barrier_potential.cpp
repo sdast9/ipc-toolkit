@@ -6,6 +6,7 @@
 #include <catch2/catch_approx.hpp>
 #include <catch2/benchmark/catch_benchmark.hpp>
 
+#include <ipc/collisions/tangential/tangential_collisions.hpp>
 #include <ipc/potentials/barrier_potential.hpp>
 #include <ipc/distance/edge_edge_mollifier.hpp>
 #include <ipc/distance/point_point.hpp>
@@ -14,6 +15,8 @@
 
 #include <finitediff.hpp>
 #include <igl/edges.h>
+
+#include <random>
 
 using namespace ipc;
 
@@ -580,4 +583,120 @@ TEST_CASE(
         JF_wrt_X =
             barrier_potential.shape_derivative(collisions, mesh, vertices);
     };
+}
+
+TEST_CASE(
+    "Barrier potential per-collision stiffness scale",
+    "[potential][barrier_potential][stiffness_scale]")
+{
+    const double dhat = sqrt(2.0);
+
+    Eigen::MatrixXd vertices;
+    Eigen::MatrixXi edges, faces;
+    REQUIRE(tests::load_mesh("cube.ply", vertices, edges, faces));
+
+    const CollisionMesh mesh(vertices, edges, faces);
+
+    NormalCollisions collisions;
+    collisions.build(mesh, vertices, dhat);
+    REQUIRE(!collisions.empty());
+
+    const BarrierPotential barrier_potential(dhat, /*stiffness=*/1.0);
+
+    const double V0 = barrier_potential(collisions, mesh, vertices);
+    const Eigen::VectorXd G0 =
+        barrier_potential.gradient(collisions, mesh, vertices);
+    const Eigen::MatrixXd H0 =
+        barrier_potential.hessian(collisions, mesh, vertices);
+
+    SECTION("uniform scale matches scaled baseline")
+    {
+        for (size_t i = 0; i < collisions.size(); i++) {
+            collisions[i].stiffness_scale = 2.0;
+        }
+        // Each per-collision term is scaled exactly (power of two), but the
+        // parallel reduction order is nondeterministic, so compare with a
+        // tight relative tolerance instead of bitwise.
+        CHECK(
+            barrier_potential(collisions, mesh, vertices)
+            == Catch::Approx(2 * V0).epsilon(1e-12));
+        CHECK(barrier_potential.gradient(collisions, mesh, vertices)
+                  .isApprox(2 * G0, 1e-12));
+        CHECK(Eigen::MatrixXd(
+                  barrier_potential.hessian(collisions, mesh, vertices))
+                  .isApprox(2 * H0, 1e-12));
+    }
+
+    SECTION("random per-collision scales match finite differences")
+    {
+        std::mt19937 rng(42);
+        std::uniform_real_distribution<double> dist(0.5, 4.0);
+        for (size_t i = 0; i < collisions.size(); i++) {
+            collisions[i].stiffness_scale = dist(rng);
+        }
+
+        const Eigen::VectorXd grad_b =
+            barrier_potential.gradient(collisions, mesh, vertices);
+        Eigen::VectorXd fgrad_b;
+        {
+            auto f = [&](const Eigen::VectorXd& x) {
+                return barrier_potential(
+                    collisions, mesh, tests::unflatten(x, vertices.cols()));
+            };
+            fd::finite_gradient(tests::flatten(vertices), f, fgrad_b);
+        }
+        REQUIRE(grad_b.squaredNorm() > 0);
+        CHECK(fd::compare_gradient(grad_b, fgrad_b));
+
+        const Eigen::MatrixXd hess_b =
+            barrier_potential.hessian(collisions, mesh, vertices);
+        Eigen::MatrixXd fhess_b;
+        {
+            auto f = [&](const Eigen::VectorXd& x) {
+                return barrier_potential.gradient(
+                    collisions, mesh, tests::unflatten(x, vertices.cols()));
+            };
+            fd::finite_jacobian(tests::flatten(vertices), f, fhess_b);
+        }
+        REQUIRE(hess_b.squaredNorm() > 0);
+        CHECK(fd::compare_hessian(hess_b, fhess_b, 1e-3));
+    }
+}
+
+TEST_CASE(
+    "Tangential collision normal force scales with stiffness scale",
+    "[friction][stiffness_scale]")
+{
+    const double dhat = sqrt(2.0);
+
+    Eigen::MatrixXd vertices;
+    Eigen::MatrixXi edges, faces;
+    REQUIRE(tests::load_mesh("cube.ply", vertices, edges, faces));
+
+    const CollisionMesh mesh(vertices, edges, faces);
+
+    NormalCollisions collisions;
+    collisions.build(mesh, vertices, dhat);
+    REQUIRE(!collisions.empty());
+
+    const BarrierPotential barrier_potential(dhat, /*stiffness=*/3.0);
+
+    TangentialCollisions baseline;
+    baseline.build(mesh, vertices, collisions, barrier_potential, 0.5);
+
+    const double scale = 2.5;
+    for (size_t i = 0; i < collisions.size(); i++) {
+        collisions[i].stiffness_scale = scale;
+    }
+
+    TangentialCollisions scaled;
+    scaled.build(mesh, vertices, collisions, barrier_potential, 0.5);
+
+    REQUIRE(baseline.size() == scaled.size());
+    REQUIRE(baseline.size() > 0);
+    for (size_t i = 0; i < baseline.size(); i++) {
+        CHECK(
+            scaled[i].normal_force_magnitude
+            == Catch::Approx(scale * baseline[i].normal_force_magnitude));
+    }
 }

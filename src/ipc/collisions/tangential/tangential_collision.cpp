@@ -9,10 +9,14 @@ void TangentialCollision::init(
     Eigen::ConstRef<VectorMax12d> positions,
     const NormalPotential& normal_potential)
 {
+    // The per-collision stiffness_scale multiplies the barrier stiffness, so
+    // it scales the lagged normal force magnitude (the stencil weight is
+    // applied separately by the tangential potential).
     init(
         collision, positions,
-        normal_potential.force_magnitude(
-            compute_distance(positions), collision.dmin));
+        collision.stiffness_scale
+            * normal_potential.force_magnitude(
+                compute_distance(positions), collision.dmin));
 }
 
 void TangentialCollision::init(

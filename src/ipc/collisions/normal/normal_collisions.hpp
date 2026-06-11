@@ -72,6 +72,20 @@ public:
         const CollisionMesh& mesh,
         Eigen::ConstRef<Eigen::MatrixXd> vertices) const;
 
+    /// @brief Computes the average squared distance over active collisions.
+    /// @note Distances are SQUARED distances (consistent with
+    ///       compute_minimum_distance); only collisions with squared distance
+    ///       ≤ d̂² are included.
+    /// @param mesh The collision mesh.
+    /// @param vertices Vertices of the collision mesh.
+    /// @param dhat The activation distance of the barrier.
+    /// @returns The average squared distance over collisions with squared
+    ///          distance ≤ d̂², or +∞ if there are none.
+    double compute_avg_distance(
+        const CollisionMesh& mesh,
+        Eigen::ConstRef<Eigen::MatrixXd> vertices,
+        const double dhat) const;
+
     // ------------------------------------------------------------------------
 
     /// @brief Get the number of collisions.

@@ -128,11 +128,11 @@ double NormalPotential::operator()(
     const NormalCollision& collision,
     Eigen::ConstRef<VectorMax12d> positions) const
 {
-    // w * m(x) * f(d(x))
+    // w * s * m(x) * f(d(x))
     // NOTE: can save a multiplication by checking if !collision.is_mollified()
     const double d = collision.compute_distance(positions);
-    return collision.weight * collision.mollifier(positions)
-        * (*this)(d, collision.dmin);
+    return collision.weight * collision.stiffness_scale
+        * collision.mollifier(positions) * (*this)(d, collision.dmin);
 }
 
 VectorMax12d NormalPotential::gradient(
@@ -157,9 +157,12 @@ VectorMax12d NormalPotential::gradient(
     // f'(d(x))
     const double grad_f = gradient(d, collision.dmin);
 
+    // w * s (stiffness_scale is constant wrt positions)
+    const double w = collision.weight * collision.stiffness_scale;
+
     if (!collision.is_mollified()) {
         // ∇[f(d(x))] = f'(d(x)) * ∇d(x)
-        return (collision.weight * grad_f) * grad_d;
+        return (w * grad_f) * grad_d;
     }
 
     // Mollified (edge-edge) path: need to apply product rule to m(x) * f(d(x)).
@@ -167,8 +170,7 @@ VectorMax12d NormalPotential::gradient(
         collision.mollifier_gradient(positions); // ∇m(x)
 
     // ∇[m(x) * f(d(x))] = f(d(x)) * ∇m(x) + m(x) * ∇ f(d(x))
-    return (collision.weight * f) * grad_m
-        + (collision.weight * m * grad_f) * grad_d;
+    return (w * f) * grad_m + (w * m * grad_f) * grad_d;
 }
 
 MatrixMax12d NormalPotential::hessian(
@@ -179,13 +181,16 @@ MatrixMax12d NormalPotential::hessian(
     // d(x)
     const double d = collision.compute_distance(positions);
 
+    // w * s (stiffness_scale is constant wrt positions)
+    const double w = collision.weight * collision.stiffness_scale;
+
     // Mollified (edge-edge) path: same reasoning as gradient() — check
     // m(x) before evaluating barrier derivatives.
     const double m = collision.mollifier(positions); // m(x)
     if (collision.is_mollified() && m <= 0) {
         const double f = (*this)(d, collision.dmin);
         const MatrixMax12d hess_m = collision.mollifier_hessian(positions);
-        return (collision.weight * f) * hess_m;
+        return (w * f) * hess_m;
     }
 
     // ∇d(x)
@@ -202,8 +207,8 @@ MatrixMax12d NormalPotential::hessian(
     if (!collision.is_mollified()) {
         // ∇²[f(d(x))] = ∇(f'(d(x)) * ∇d(x))
         //             = f"(d(x)) * ∇d(x) * ∇d(x)ᵀ + f'(d(x)) * ∇²d(x)
-        hess = (collision.weight * hess_f) * grad_d * grad_d.transpose()
-            + (collision.weight * grad_f) * hess_d;
+        hess = (w * hess_f) * grad_d * grad_d.transpose()
+            + (w * grad_f) * hess_d;
     } else {
         const double f = (*this)(d, collision.dmin); // f(d(x))
 
@@ -212,16 +217,16 @@ MatrixMax12d NormalPotential::hessian(
         // ∇² m(x)
         const MatrixMax12d hess_m = collision.mollifier_hessian(positions);
 
-        const double weighted_m = collision.weight * m;
+        const double weighted_m = w * m;
 
         // ∇f(d(x)) * ∇m(x)ᵀ
         const MatrixMax12d grad_f_grad_m =
-            (collision.weight * grad_f) * grad_d * grad_m.transpose();
+            (w * grad_f) * grad_d * grad_m.transpose();
 
         // ∇²[m(x) * f(d(x))] = ∇[∇m(x) * f(d(x)) + m(x) * ∇f(d(x))]
         //                    = ∇²m(x) * f(d(x)) + ∇f(d(x)) * ∇m(x)ᵀ
         //                      + ∇m(x) * ∇f(d(x))ᵀ + m(x) * ∇²f(d(x))
-        hess = (collision.weight * f) * hess_m + grad_f_grad_m
+        hess = (w * f) * hess_m + grad_f_grad_m
             + grad_f_grad_m.transpose()
             + (weighted_m * hess_f) * grad_d * grad_d.transpose()
             + (weighted_m * grad_f) * hess_d;
@@ -263,8 +268,9 @@ VectorMax12d NormalPotential::gauss_newton_hessian_diagonal(
     const VectorMax12d diag_JtttJt =
         CollisionStencil::diag_distance_vector_t_outer(coeffs, t);
 
-    const double s1 = collision.weight * 4.0 * hess_f;
-    const double s2 = collision.weight * 2.0 * grad_f;
+    const double w = collision.weight * collision.stiffness_scale;
+    const double s1 = w * 4.0 * hess_f;
+    const double s2 = w * 2.0 * grad_f;
 
     return s1 * diag_JtttJt + s2 * diag_JtJ;
 }
@@ -304,7 +310,8 @@ double NormalPotential::gauss_newton_hessian_quadratic_form(
     // ‖pᵀ·∂t/∂x‖² = ‖pT_J‖²
     const double term2 = pT_J.squaredNorm();
 
-    return collision.weight * (4.0 * hess_f * term1 + 2.0 * grad_f * term2);
+    return collision.weight * collision.stiffness_scale
+        * (4.0 * hess_f * term1 + 2.0 * grad_f * term2);
 }
 
 void NormalPotential::shape_derivative(
@@ -333,7 +340,11 @@ void NormalPotential::shape_derivative(
     if (collision.weight_gradient.nonZeros() > 0) {
         VectorMax12d grad_f = gradient(collision, positions);
         assert(collision.weight != 0);
-        grad_f.array() /= collision.weight; // remove weight
+        // Remove the weight but keep stiffness_scale: the first term of the
+        // product rule is (∇ₓw)(s·∇ᵤf)ᵀ since s is constant wrt rest
+        // positions (callers using stiffness_scale with shape derivatives
+        // must ensure s does not depend on x̄).
+        grad_f.array() /= collision.weight;
 
         for (int i = 0; i < collision.num_vertices(); i++) {
             for (int d = 0; d < dim; d++) {
@@ -368,16 +379,16 @@ void NormalPotential::shape_derivative(
         const MatrixMax12d hess_d =
             collision.compute_distance_hessian(positions);
 
+        const double w = collision.weight * collision.stiffness_scale;
+
         // f(d(x̄+u))
-        const double f = collision.weight * (*this)(d, collision.dmin);
+        const double f = w * (*this)(d, collision.dmin);
         // ∇ᵤ f(d(x̄+u))
-        const Vector12d gradu_f =
-            (collision.weight * gradient(d, collision.dmin)) * grad_d;
+        const Vector12d gradu_f = (w * gradient(d, collision.dmin)) * grad_d;
         // ∇ᵤ² f(d(x̄+u))
         const Matrix12d hessu_f =
-            (collision.weight * hessian(d, collision.dmin)) * grad_d
-                * grad_d.transpose()
-            + (collision.weight * gradient(d, collision.dmin)) * hess_d;
+            (w * hessian(d, collision.dmin)) * grad_d * grad_d.transpose()
+            + (w * gradient(d, collision.dmin)) * hess_d;
 
         // ε(x̄)
         const double eps_x = collision.mollifier_threshold(rest_positions);

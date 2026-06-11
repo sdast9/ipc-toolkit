@@ -149,6 +149,24 @@ void define_normal_collisions(py::module_& m)
             )ipc_Qu8mg5v7",
             "mesh"_a, "vertices"_a)
         .def(
+            "compute_avg_distance", &NormalCollisions::compute_avg_distance,
+            R"ipc_Qu8mg5v7(
+            Computes the average squared distance over active collisions.
+
+            Note:
+                Distances are SQUARED distances; only collisions with squared
+                distance ≤ d̂² are included.
+
+            Parameters:
+                mesh: The collision mesh.
+                vertices: Vertices of the collision mesh.
+                dhat: The activation distance of the barrier.
+
+            Returns:
+                The average squared distance over active collisions, or +inf if there are none.
+            )ipc_Qu8mg5v7",
+            "mesh"_a, "vertices"_a, "dhat"_a)
+        .def(
             "__len__", &NormalCollisions::size, "Get the number of collisions.")
         .def(
             "empty", &NormalCollisions::empty,

@@ -142,6 +142,9 @@ void define_normal_collision(py::module_& m)
         .def_readwrite(
             "weight", &NormalCollision::weight,
             "The term's weight (e.g., collision area)")
+        .def_readwrite(
+            "stiffness_scale", &NormalCollision::stiffness_scale,
+            "Local stiffness multiplier applied on top of the potential's global stiffness.")
         .def_property(
             "weight_gradient",
             [](const NormalCollision& self) -> Eigen::SparseMatrix<double> {

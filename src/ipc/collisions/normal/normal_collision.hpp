@@ -93,6 +93,13 @@ public:
     /// @brief The term's weight (e.g., collision area)
     double weight = 1;
 
+    /// @brief Local stiffness multiplier applied on top of the potential's
+    ///        global stiffness (e.g., a per-collision semi-implicit stiffness
+    ///        from semi_implicit_stiffness()). Multiplies, never replaces,
+    ///        the potential's stiffness. Assumed constant wrt positions and
+    ///        rest positions.
+    double stiffness_scale = 1;
+
     /// @brief The gradient of the term's weight wrt the rest positions.
     Eigen::SparseVector<double> weight_gradient;
 };

@@ -232,6 +232,48 @@ double NormalCollisions::compute_minimum_distance(
         [](double a, double b) { return std::min(a, b); });
 }
 
+double NormalCollisions::compute_avg_distance(
+    const CollisionMesh& mesh,
+    Eigen::ConstRef<Eigen::MatrixXd> vertices,
+    const double dhat) const
+{
+    assert(vertices.rows() == mesh.num_vertices());
+
+    if (empty()) {
+        return std::numeric_limits<double>::infinity();
+    }
+
+    const Eigen::MatrixXi& edges = mesh.edges();
+    const Eigen::MatrixXi& faces = mesh.faces();
+    const double dhat_sq = dhat * dhat;
+
+    // NOTE: distances are squared distances.
+    using SumCount = std::pair<double, size_t>;
+    const SumCount total = tbb::parallel_reduce(
+        tbb::blocked_range<size_t>(0, size()), SumCount(0.0, 0),
+        [&](const tbb::blocked_range<size_t>& r, SumCount partial) {
+            for (size_t i = r.begin(); i < r.end(); i++) {
+                const double dist = (*this)[i].compute_distance(
+                    (*this)[i].dof(vertices, edges, faces));
+
+                // Only accumulate active collisions (within d̂).
+                if (dist <= dhat_sq) {
+                    partial.first += dist;
+                    partial.second++;
+                }
+            }
+            return partial;
+        },
+        [](const SumCount& a, const SumCount& b) {
+            return SumCount(a.first + b.first, a.second + b.second);
+        });
+
+    if (total.second == 0) {
+        return std::numeric_limits<double>::infinity();
+    }
+    return total.first / static_cast<double>(total.second);
+}
+
 // ============================================================================
 
 size_t NormalCollisions::size() const

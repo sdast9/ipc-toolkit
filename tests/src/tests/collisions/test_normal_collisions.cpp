@@ -9,6 +9,8 @@
 
 #include <igl/edges.h>
 
+#include <cmath>
+
 using namespace ipc;
 
 TEST_CASE("Codim. vertex-vertex collisions", "[collisions][codim]")
@@ -375,4 +377,55 @@ ee: 14=(18, 37) 456=(144, 187), w: -0.00297852, dtype: 0, d: 0.00538125
 ee: 346=(67, 119) 718=(218, 243), w: -0.00328539, dtype: 5, d: 0.00717647
 fv: 17=(37, 18, 63) 187, w: 0.0137957, d: 0.00500269
 fv: 471=(140, 220, 241) 55, w: 0.0160469, d: 0.006392)ipc_Qu8mg5v7");
+}
+TEST_CASE(
+    "NormalCollisions::compute_avg_distance",
+    "[collisions][avg_distance]")
+{
+    const double dhat = sqrt(2.0);
+
+    Eigen::MatrixXd vertices;
+    Eigen::MatrixXi edges, faces;
+    REQUIRE(tests::load_mesh("cube.ply", vertices, edges, faces));
+
+    const CollisionMesh mesh(vertices, edges, faces);
+
+    NormalCollisions collisions;
+
+    SECTION("empty set returns infinity")
+    {
+        CHECK(std::isinf(collisions.compute_avg_distance(mesh, vertices, dhat)));
+    }
+
+    SECTION("matches serial brute force")
+    {
+        collisions.build(mesh, vertices, dhat);
+        REQUIRE(!collisions.empty());
+
+        // Serial reference: average SQUARED distance over active collisions.
+        double sum = 0;
+        size_t count = 0;
+        for (size_t i = 0; i < collisions.size(); i++) {
+            const double dist_sq = collisions[i].compute_distance(
+                collisions[i].dof(vertices, mesh.edges(), mesh.faces()));
+            if (dist_sq <= dhat * dhat) {
+                sum += dist_sq;
+                count++;
+            }
+        }
+        REQUIRE(count > 0);
+
+        const double avg = collisions.compute_avg_distance(mesh, vertices, dhat);
+        CHECK(avg == Catch::Approx(sum / count));
+
+        // Consistency: min squared distance ≤ avg squared distance.
+        const double min_dist_sq =
+            collisions.compute_minimum_distance(mesh, vertices);
+        CHECK(min_dist_sq <= avg);
+
+        // Shrinking dhat below the minimum distance deactivates everything.
+        const double tiny_dhat = 0.5 * sqrt(min_dist_sq);
+        CHECK(std::isinf(
+            collisions.compute_avg_distance(mesh, vertices, tiny_dhat)));
+    }
 }
