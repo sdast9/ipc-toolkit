@@ -171,6 +171,16 @@ public:
     Eigen::MatrixXd map_displacements(
         Eigen::ConstRef<Eigen::MatrixXd> full_displacements) const;
 
+    /// @brief Sparse map from input displacement nodes to included collision
+    /// vertices. Includes both vertex selection and any supplied interpolation.
+    /// Rows index collision vertices; columns index displacement nodes, which
+    /// need not coincide with the input proxy IDs returned by
+    /// to_full_vertex_id.
+    const Eigen::SparseMatrix<double>& displacement_map() const
+    {
+        return m_displacement_map;
+    }
+
     /// @brief Map a vertex ID to the corresponding vertex ID in the full mesh.
     /// @param id Vertex ID in the collision mesh.
     /// @return Vertex ID in the full mesh.
