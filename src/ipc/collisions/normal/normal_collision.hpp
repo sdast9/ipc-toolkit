@@ -5,7 +5,33 @@
 
 #include <Eigen/Core>
 
+#include <cstdint>
+#include <vector>
+
 namespace ipc {
+
+/// @brief One candidate primitive pair's contribution to a built collision.
+///
+/// NormalCollisionsBuilder routes candidates to collisions by closest
+/// subfeature (an edge-vertex candidate becomes a vertex-vertex collision when
+/// the closest point is an endpoint) and accumulates their weights. The
+/// candidate identity is kept here so a caller can attribute per-parent
+/// quantities (e.g. a per-collision stiffness_scale keyed on the parent, which
+/// then survives closest-feature switches). Duplicate-removal corrections are
+/// contributions too and may carry negative weights. Sum of weights over
+/// parents == weight.
+struct ParentContribution {
+    enum class Type : std::uint8_t {
+        VertexVertex,
+        EdgeVertex,
+        EdgeEdge,
+        FaceVertex
+    };
+    Type type;
+    index_t id0;   ///< First primitive id of the candidate (vertex/edge/face)
+    index_t id1;   ///< Second primitive id of the candidate
+    double weight; ///< Weight this candidate added to the collision
+};
 
 class NormalCollision : virtual public CollisionStencil {
 public:
@@ -102,6 +128,11 @@ public:
 
     /// @brief The gradient of the term's weight wrt the rest positions.
     Eigen::SparseVector<double> weight_gradient;
+
+    /// @brief The candidate contributions that built this collision (see
+    ///        ParentContribution). Empty for collisions constructed directly
+    ///        rather than through NormalCollisionsBuilder.
+    std::vector<ParentContribution> parents;
 };
 
 } // namespace ipc

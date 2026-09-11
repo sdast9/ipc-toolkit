@@ -86,12 +86,13 @@ protected:
         const index_t vertex0_id,
         const index_t vertex1_id,
         const double weight,
-        const Eigen::SparseVector<double>& weight_gradient)
+        const Eigen::SparseVector<double>& weight_gradient,
+        const ParentContribution& parent)
     {
-        add_vertex_vertex_collision(
-            VertexVertexNormalCollision(
-                vertex0_id, vertex1_id, weight, weight_gradient),
-            vv_to_id, vv_collisions);
+        VertexVertexNormalCollision vv(
+            vertex0_id, vertex1_id, weight, weight_gradient);
+        vv.parents = { parent };
+        add_vertex_vertex_collision(vv, vv_to_id, vv_collisions);
     }
 
     // -------------------------------------------------------------------------
@@ -105,12 +106,13 @@ protected:
         const index_t edge_id,
         const index_t vertex_id,
         const double weight,
-        const Eigen::SparseVector<double>& weight_gradient)
+        const Eigen::SparseVector<double>& weight_gradient,
+        const ParentContribution& parent)
     {
-        add_edge_vertex_collision(
-            EdgeVertexNormalCollision(
-                edge_id, vertex_id, weight, weight_gradient),
-            ev_to_id, ev_collisions);
+        EdgeVertexNormalCollision ev(
+            edge_id, vertex_id, weight, weight_gradient);
+        ev.parents = { parent };
+        add_edge_vertex_collision(ev, ev_to_id, ev_collisions);
     }
 
     void add_edge_vertex_collision(
@@ -118,7 +120,8 @@ protected:
         const EdgeVertexCandidate& candidate,
         const PointEdgeDistanceType dtype,
         const double weight,
-        const Eigen::SparseVector<double>& weight_gradient);
+        const Eigen::SparseVector<double>& weight_gradient,
+        const ParentContribution& parent);
 
     // -------------------------------------------------------------------------
 
@@ -133,12 +136,13 @@ protected:
         const double eps_x,
         const double weight,
         const Eigen::SparseVector<double>& weight_gradient,
-        const EdgeEdgeDistanceType dtype)
+        const EdgeEdgeDistanceType dtype,
+        const ParentContribution& parent)
     {
-        add_edge_edge_collision(
-            EdgeEdgeNormalCollision(
-                edge0_id, edge1_id, eps_x, weight, weight_gradient, dtype),
-            ee_to_id, ee_collisions);
+        EdgeEdgeNormalCollision ee(
+            edge0_id, edge1_id, eps_x, weight, weight_gradient, dtype);
+        ee.parents = { parent };
+        add_edge_edge_collision(ee, ee_to_id, ee_collisions);
     }
 
     // -------------------------------------------------------------------------

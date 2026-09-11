@@ -11,6 +11,18 @@
 
 namespace ipc {
 
+namespace {
+    using PType = ParentContribution::Type;
+    ParentContribution parent_of(
+        const PType type,
+        const index_t id0,
+        const index_t id1,
+        const double weight)
+    {
+        return ParentContribution { type, id0, id1, weight };
+    }
+} // namespace
+
 NormalCollisionsBuilder::NormalCollisionsBuilder(
     const bool _use_area_weighting,
     const bool _enable_shape_derivatives,
@@ -53,6 +65,7 @@ void NormalCollisionsBuilder::add_vertex_vertex_collision(
     }
 
     VertexVertexNormalCollision vv(vi, vj, weight, weight_gradient);
+    vv.parents = { parent_of(PType::VertexVertex, vi, vj, weight) };
     vv_to_id.emplace(vv, vv_collisions.size());
     vv_collisions.push_back(vv);
 }
@@ -103,7 +116,9 @@ void NormalCollisionsBuilder::add_edge_vertex_collision(
         }
     }
 
-    add_edge_vertex_collision(mesh, candidate, dtype, weight, weight_gradient);
+    add_edge_vertex_collision(
+        mesh, candidate, dtype, weight, weight_gradient,
+        parent_of(PType::EdgeVertex, ei, vi, weight));
 }
 
 void NormalCollisionsBuilder::add_edge_vertex_collision(
@@ -111,23 +126,24 @@ void NormalCollisionsBuilder::add_edge_vertex_collision(
     const EdgeVertexCandidate& candidate,
     const PointEdgeDistanceType dtype,
     const double weight,
-    const Eigen::SparseVector<double>& weight_gradient)
+    const Eigen::SparseVector<double>& weight_gradient,
+    const ParentContribution& parent)
 {
     const auto& [ei, vi] = candidate;
 
     switch (dtype) {
     case PointEdgeDistanceType::P_E0:
         add_vertex_vertex_collision(
-            vi, mesh.edges()(ei, 0), weight, weight_gradient);
+            vi, mesh.edges()(ei, 0), weight, weight_gradient, parent);
         break;
 
     case PointEdgeDistanceType::P_E1:
         add_vertex_vertex_collision(
-            vi, mesh.edges()(ei, 1), weight, weight_gradient);
+            vi, mesh.edges()(ei, 1), weight, weight_gradient, parent);
         break;
 
     case PointEdgeDistanceType::P_E:
-        add_edge_vertex_collision(ei, vi, weight, weight_gradient);
+        add_edge_vertex_collision(ei, vi, weight, weight_gradient, parent);
         break;
 
     case PointEdgeDistanceType::AUTO:
@@ -190,42 +206,50 @@ void NormalCollisionsBuilder::add_edge_edge_collision(
             : Eigen::SparseVector<double>(vertices.size());
     }
 
+    const ParentContribution parent =
+        parent_of(PType::EdgeEdge, eai, ebi, weight);
+
     switch (dtype) {
     case EdgeEdgeDistanceType::EA0_EB0:
-        add_vertex_vertex_collision(ea0i, eb0i, weight, weight_gradient);
+        add_vertex_vertex_collision(
+            ea0i, eb0i, weight, weight_gradient, parent);
         break;
 
     case EdgeEdgeDistanceType::EA0_EB1:
-        add_vertex_vertex_collision(ea0i, eb1i, weight, weight_gradient);
+        add_vertex_vertex_collision(
+            ea0i, eb1i, weight, weight_gradient, parent);
         break;
 
     case EdgeEdgeDistanceType::EA1_EB0:
-        add_vertex_vertex_collision(ea1i, eb0i, weight, weight_gradient);
+        add_vertex_vertex_collision(
+            ea1i, eb0i, weight, weight_gradient, parent);
         break;
 
     case EdgeEdgeDistanceType::EA1_EB1:
-        add_vertex_vertex_collision(ea1i, eb1i, weight, weight_gradient);
+        add_vertex_vertex_collision(
+            ea1i, eb1i, weight, weight_gradient, parent);
         break;
 
     case EdgeEdgeDistanceType::EA_EB0:
-        add_edge_vertex_collision(eai, eb0i, weight, weight_gradient);
+        add_edge_vertex_collision(eai, eb0i, weight, weight_gradient, parent);
         break;
 
     case EdgeEdgeDistanceType::EA_EB1:
-        add_edge_vertex_collision(eai, eb1i, weight, weight_gradient);
+        add_edge_vertex_collision(eai, eb1i, weight, weight_gradient, parent);
         break;
 
     case EdgeEdgeDistanceType::EA0_EB:
-        add_edge_vertex_collision(ebi, ea0i, weight, weight_gradient);
+        add_edge_vertex_collision(ebi, ea0i, weight, weight_gradient, parent);
         break;
 
     case EdgeEdgeDistanceType::EA1_EB:
-        add_edge_vertex_collision(ebi, ea1i, weight, weight_gradient);
+        add_edge_vertex_collision(ebi, ea1i, weight, weight_gradient, parent);
         break;
 
     case EdgeEdgeDistanceType::EA_EB:
         ee_collisions.emplace_back(
             eai, ebi, eps_x, weight, weight_gradient, actual_dtype);
+        ee_collisions.back().parents = { parent };
         ee_to_id.emplace(ee_collisions.back(), ee_collisions.size() - 1);
         break;
 
@@ -296,36 +320,40 @@ void NormalCollisionsBuilder::add_face_vertex_collision(
         }
     }
 
+    const ParentContribution parent =
+        parent_of(PType::FaceVertex, fi, vi, weight);
+
     switch (dtype) {
     case PointTriangleDistanceType::P_T0:
-        add_vertex_vertex_collision(vi, f0i, weight, weight_gradient);
+        add_vertex_vertex_collision(vi, f0i, weight, weight_gradient, parent);
         break;
 
     case PointTriangleDistanceType::P_T1:
-        add_vertex_vertex_collision(vi, f1i, weight, weight_gradient);
+        add_vertex_vertex_collision(vi, f1i, weight, weight_gradient, parent);
         break;
 
     case PointTriangleDistanceType::P_T2:
-        add_vertex_vertex_collision(vi, f2i, weight, weight_gradient);
+        add_vertex_vertex_collision(vi, f2i, weight, weight_gradient, parent);
         break;
 
     case PointTriangleDistanceType::P_E0:
         add_edge_vertex_collision(
-            mesh.faces_to_edges()(fi, 0), vi, weight, weight_gradient);
+            mesh.faces_to_edges()(fi, 0), vi, weight, weight_gradient, parent);
         break;
 
     case PointTriangleDistanceType::P_E1:
         add_edge_vertex_collision(
-            mesh.faces_to_edges()(fi, 1), vi, weight, weight_gradient);
+            mesh.faces_to_edges()(fi, 1), vi, weight, weight_gradient, parent);
         break;
 
     case PointTriangleDistanceType::P_E2:
         add_edge_vertex_collision(
-            mesh.faces_to_edges()(fi, 2), vi, weight, weight_gradient);
+            mesh.faces_to_edges()(fi, 2), vi, weight, weight_gradient, parent);
         break;
 
     case PointTriangleDistanceType::P_T:
         fv_collisions.emplace_back(fi, vi, weight, weight_gradient);
+        fv_collisions.back().parents = { parent };
         break;
 
     case PointTriangleDistanceType::AUTO:
@@ -376,7 +404,9 @@ void NormalCollisionsBuilder::add_edge_vertex_negative_vertex_vertex_collision(
     add_weight(vj, vi, weight, weight_gradient);
 
     if (weight != 0) {
-        add_vertex_vertex_collision(vi, vj, weight, weight_gradient);
+        add_vertex_vertex_collision(
+            vi, vj, weight, weight_gradient,
+            parent_of(PType::VertexVertex, vi, vj, weight));
     }
 }
 
@@ -418,7 +448,9 @@ void NormalCollisionsBuilder::add_face_vertex_positive_vertex_vertex_collision(
     add_weight(vj, vi, weight, weight_gradient);
 
     if (weight != 0) {
-        add_vertex_vertex_collision(vi, vj, weight, weight_gradient);
+        add_vertex_vertex_collision(
+            vi, vj, weight, weight_gradient,
+            parent_of(PType::VertexVertex, vi, vj, weight));
     }
 }
 
@@ -455,7 +487,8 @@ void NormalCollisionsBuilder::add_face_vertex_negative_edge_vertex_collision(
             point_edge_distance_type(
                 vertices.row(vi), vertices.row(mesh.edges()(ei, 0)),
                 vertices.row(mesh.edges()(ei, 1))),
-            weight, weight_gradient);
+            weight, weight_gradient,
+            parent_of(PType::EdgeVertex, ei, vi, weight));
     }
 }
 
@@ -529,7 +562,8 @@ void NormalCollisionsBuilder::add_edge_edge_negative_edge_vertex_collision(
         }
 
         add_edge_edge_collision(
-            ea, eb, eps_x, weight, weight_gradient, ee_dtype);
+            ea, eb, eps_x, weight, weight_gradient, ee_dtype,
+            parent_of(PType::EdgeVertex, ea, p, weight));
     }
 
     if (nonmollified_incident_edge_amt == 1) {
@@ -539,7 +573,10 @@ void NormalCollisionsBuilder::add_edge_edge_negative_edge_vertex_collision(
     // add a positive collision.
     add_edge_vertex_collision(
         mesh, candidate, dtype, (nonmollified_incident_edge_amt - 1) * weight,
-        (nonmollified_incident_edge_amt - 1) * weight_gradient);
+        (nonmollified_incident_edge_amt - 1) * weight_gradient,
+        parent_of(
+            PType::EdgeVertex, ea, p,
+            (nonmollified_incident_edge_amt - 1) * weight));
 }
 
 // ============================================================================
@@ -555,6 +592,10 @@ void NormalCollisionsBuilder::add_vertex_vertex_collision(
         vv_collisions[found_item->second].weight += vv_collision.weight;
         vv_collisions[found_item->second].weight_gradient +=
             vv_collision.weight_gradient;
+        auto& parents = vv_collisions[found_item->second].parents;
+        parents.insert(
+            parents.end(), vv_collision.parents.begin(),
+            vv_collision.parents.end());
     } else {
         // New collision, so add it to the end of vv_collisions
         vv_to_id.emplace(vv_collision, vv_collisions.size());
@@ -573,6 +614,10 @@ void NormalCollisionsBuilder::add_edge_vertex_collision(
         ev_collisions[found_item->second].weight += ev_collision.weight;
         ev_collisions[found_item->second].weight_gradient +=
             ev_collision.weight_gradient;
+        auto& parents = ev_collisions[found_item->second].parents;
+        parents.insert(
+            parents.end(), ev_collision.parents.begin(),
+            ev_collision.parents.end());
     } else {
         // New collision, so add it to the end of ev_collisions
         ev_to_id.emplace(ev_collision, ev_collisions.size());
@@ -592,6 +637,10 @@ void NormalCollisionsBuilder::add_edge_edge_collision(
         ee_collisions[found_item->second].weight += ee_collision.weight;
         ee_collisions[found_item->second].weight_gradient +=
             ee_collision.weight_gradient;
+        auto& parents = ee_collisions[found_item->second].parents;
+        parents.insert(
+            parents.end(), ee_collision.parents.begin(),
+            ee_collision.parents.end());
     } else {
         // New collision, so add it to the end of ee_collisions
         ee_to_id.emplace(ee_collision, ee_collisions.size());
