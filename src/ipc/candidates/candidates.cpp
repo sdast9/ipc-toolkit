@@ -24,6 +24,27 @@
 namespace ipc {
 
 namespace {
+    // Candidates::build runs up to three broad-phase builds (the main pass
+    // and the codimensional passes), each of which resets the broad phase's
+    // statistics: sum them so the caller sees the whole candidate build.
+    void accumulate_statistics(
+        BroadPhaseBuildStatistics& total, const BroadPhase& broad_phase)
+    {
+        const BroadPhaseBuildStatistics& s = broad_phase.build_statistics();
+        total.measured = total.measured || s.measured;
+        total.vertex_boxes += s.vertex_boxes;
+        total.edge_boxes += s.edge_boxes;
+        total.face_boxes += s.face_boxes;
+        total.cell_items += s.cell_items;
+        total.candidate_emissions += s.candidate_emissions;
+        if (total.cell_size == 0) { // the main pass sizes the grid
+            total.cell_size = s.cell_size;
+            total.grid_size = s.grid_size;
+        }
+    }
+} // namespace
+
+namespace {
     // Pad codim_edges because remove_unreferenced requires a N×3 matrix.
     Eigen::MatrixXi pad_edges(Eigen::ConstRef<Eigen::MatrixXi> E)
     {
@@ -54,13 +75,34 @@ void Candidates::build(
         broad_phase = default_broad_phase.get();
     }
 
-    const int dim = vertices.cols();
+    // An unsupported budget must fail here, before any work, for every
+    // method (some override the public build functions of BroadPhase).
+    broad_phase->check_budget_supported();
 
     clear();
+    try {
+        build_unchecked(mesh, vertices, inflation_radius, broad_phase);
+    } catch (...) {
+        // Never leave a partial candidate set behind: an exception from any
+        // stage (a budget, an allocation failure) clears every list.
+        clear();
+        throw;
+    }
+}
 
+void Candidates::build_unchecked(
+    const CollisionMesh& mesh,
+    Eigen::ConstRef<Eigen::MatrixXd> vertices,
+    const double inflation_radius,
+    BroadPhase* broad_phase)
+{
+    const int dim = vertices.cols();
+
+    BroadPhaseBuildStatistics statistics;
     broad_phase->can_vertices_collide = mesh.can_collide;
     broad_phase->build(vertices, mesh.edges(), mesh.faces(), inflation_radius);
     broad_phase->detect_collision_candidates(*this);
+    accumulate_statistics(statistics, *broad_phase);
 
     // Codim. vertices to codim. vertices:
     if (mesh.num_codim_vertices()) {
@@ -70,6 +112,7 @@ void Candidates::build(
             Eigen::MatrixXi(), Eigen::MatrixXi(), inflation_radius);
 
         broad_phase->detect_vertex_vertex_candidates(vv_candidates);
+        accumulate_statistics(statistics, *broad_phase);
         for (auto& [vi, vj] : vv_candidates) {
             vi = mesh.codim_vertices()[vi];
             vj = mesh.codim_vertices()[vj];
@@ -108,12 +151,15 @@ void Candidates::build(
         broad_phase->build(V, CE, Eigen::MatrixXi(), inflation_radius);
 
         broad_phase->detect_edge_vertex_candidates(ev_candidates);
+        accumulate_statistics(statistics, *broad_phase);
         for (auto& [ei, vi] : ev_candidates) {
             assert(vi < mesh.codim_vertices().size());
             ei = mesh.codim_edges()[ei];    // Map back to mesh.edges
             vi = mesh.codim_vertices()[vi]; // Map back to vertices
         }
     }
+
+    broad_phase->set_build_statistics(statistics);
 
     // Planes to vertices:
     for (const auto& plane : mesh.planes) {
@@ -140,14 +186,33 @@ void Candidates::build(
         broad_phase = default_broad_phase.get();
     }
 
-    const int dim = vertices_t0.cols();
+    broad_phase->check_budget_supported();
 
     clear();
+    try {
+        build_unchecked(
+            mesh, vertices_t0, vertices_t1, inflation_radius, broad_phase);
+    } catch (...) {
+        clear();
+        throw;
+    }
+}
 
+void Candidates::build_unchecked(
+    const CollisionMesh& mesh,
+    Eigen::ConstRef<Eigen::MatrixXd> vertices_t0,
+    Eigen::ConstRef<Eigen::MatrixXd> vertices_t1,
+    const double inflation_radius,
+    BroadPhase* broad_phase)
+{
+    const int dim = vertices_t0.cols();
+
+    BroadPhaseBuildStatistics statistics;
     broad_phase->can_vertices_collide = mesh.can_collide;
     broad_phase->build(
         vertices_t0, vertices_t1, mesh.edges(), mesh.faces(), inflation_radius);
     broad_phase->detect_collision_candidates(*this);
+    accumulate_statistics(statistics, *broad_phase);
 
     // Codim. vertices to codim. vertices:
     if (mesh.num_codim_vertices()) {
@@ -158,6 +223,7 @@ void Candidates::build(
             Eigen::MatrixXi(), Eigen::MatrixXi(), inflation_radius);
 
         broad_phase->detect_vertex_vertex_candidates(vv_candidates);
+        accumulate_statistics(statistics, *broad_phase);
         for (auto& [vi, vj] : vv_candidates) {
             vi = mesh.codim_vertices()[vi];
             vj = mesh.codim_vertices()[vj];
@@ -202,12 +268,15 @@ void Candidates::build(
         broad_phase->build(V_t0, V_t1, CE, Eigen::MatrixXi(), inflation_radius);
 
         broad_phase->detect_edge_vertex_candidates(ev_candidates);
+        accumulate_statistics(statistics, *broad_phase);
         for (auto& [ei, vi] : ev_candidates) {
             assert(vi < mesh.codim_vertices().size());
             ei = mesh.codim_edges()[ei];    // Map back to mesh.edges
             vi = mesh.codim_vertices()[vi]; // Map back to vertices
         }
     }
+
+    broad_phase->set_build_statistics(statistics);
 
     // Planes to vertices:
     for (const auto& plane : mesh.planes) {

@@ -4,9 +4,11 @@
 #include <ipc/utils/logger.hpp>
 #include <ipc/utils/merge_thread_local.hpp>
 
+#include <tbb/blocked_range.h>
 #include <tbb/blocked_range2d.h>
 #include <tbb/enumerable_thread_specific.h>
 #include <tbb/parallel_for.h>
+#include <tbb/parallel_reduce.h>
 #include <tbb/parallel_sort.h>
 
 #include <algorithm> // std::min/max
@@ -30,7 +32,89 @@ void HashGrid::build(
         suggest_good_voxel_size(edges.rows() > 0 ? edge_boxes : vertex_boxes);
     resize(mesh_min, mesh_max, cell_size);
 
+    m_build_statistics.cell_size = cell_size;
+    for (int i = 0; i < 3; ++i) {
+        m_build_statistics.grid_size[i] = grid_size()[i];
+    }
+
+    // Opt-in: the exact item count is known from the boxes alone, so the
+    // budget is enforced before the first item is allocated.
+    check_cell_item_budget();
+
     insert_boxes();
+
+    m_build_statistics.measured = true;
+    m_build_statistics.cell_items =
+        vertex_items.size() + edge_items.size() + face_items.size();
+}
+
+void HashGrid::box_cell_range(
+    const AABB& aabb, Eigen::Array3i& int_min, Eigen::Array3i& int_max) const
+{
+    int_min = ((aabb.min - domain_min()) / cell_size()).cast<int>();
+    // We can round down to -1, but not less
+    assert((int_min >= -1).all());
+    assert((int_min <= grid_size()).all());
+    int_min = int_min.max(0).min(grid_size() - 1);
+
+    int_max = ((aabb.max - domain_min()) / cell_size()).cast<int>();
+    assert((int_max >= -1).all());
+    assert((int_max <= grid_size()).all());
+    int_max = int_max.max(0).min(grid_size() - 1);
+    assert((int_min <= int_max).all());
+}
+
+size_t HashGrid::count_cell_items(const AABBs& boxes) const
+{
+    return tbb::parallel_reduce(
+        tbb::blocked_range<size_t>(0, boxes.size()), size_t(0),
+        [&](const tbb::blocked_range<size_t>& r, size_t total) {
+            Eigen::Array3i int_min, int_max;
+            for (size_t i = r.begin(); i != r.end(); ++i) {
+                box_cell_range(boxes[i], int_min, int_max);
+                size_t cells = size_t(int_max.x() - int_min.x() + 1)
+                    * size_t(int_max.y() - int_min.y() + 1);
+                if (dim == 3) {
+                    cells *= size_t(int_max.z() - int_min.z() + 1);
+                }
+                total += cells;
+            }
+            return total;
+        },
+        std::plus<size_t>());
+}
+
+void HashGrid::check_cell_item_budget() const
+{
+    if (budget.max_cell_items == 0) {
+        return;
+    }
+    const size_t items = count_cell_items(vertex_boxes)
+        + count_cell_items(edge_boxes) + count_cell_items(face_boxes);
+    if (items > budget.max_cell_items) {
+        throw BroadPhaseBudgetExceeded(
+            name(), "cell_items", items, budget.max_cell_items,
+            fmt::format(
+                "{} vertex, {} edge and {} face boxes over a {}x{}x{} grid of cell size {:g} ({} bytes of items)",
+                vertex_boxes.size(), edge_boxes.size(), face_boxes.size(),
+                grid_size()[0], grid_size()[1], grid_size()[2], cell_size(),
+                items * sizeof(HashItem)));
+    }
+}
+
+void HashGrid::check_emission_budget(const size_t emissions) const
+{
+    m_build_statistics.candidate_emissions += emissions;
+    if (budget.max_candidate_emissions > 0
+        && emissions > budget.max_candidate_emissions) {
+        throw BroadPhaseBudgetExceeded(
+            name(), "candidate_emissions", emissions,
+            budget.max_candidate_emissions,
+            fmt::format(
+                "item pairs sharing a cell in one detect call before filtering and deduplication; {} vertex, {} edge and {} face items over a {}x{}x{} grid of cell size {:g}",
+                vertex_items.size(), edge_items.size(), face_items.size(),
+                grid_size()[0], grid_size()[1], grid_size()[2], cell_size()));
+    }
 }
 
 void HashGrid::resize(
@@ -78,19 +162,8 @@ void HashGrid::insert_boxes(
 void HashGrid::insert_box(
     const AABB& aabb, const long id, std::vector<HashItem>& items) const
 {
-    Eigen::Array3i int_min =
-        ((aabb.min - domain_min()) / cell_size()).cast<int>();
-    // We can round down to -1, but not less
-    assert((int_min >= -1).all());
-    assert((int_min <= grid_size()).all());
-    int_min = int_min.max(0).min(grid_size() - 1);
-
-    Eigen::Array3i int_max =
-        ((aabb.max - domain_min()) / cell_size()).cast<int>();
-    assert((int_max >= -1).all());
-    assert((int_max <= grid_size()).all());
-    int_max = int_max.max(0).min(grid_size() - 1);
-    assert((int_min <= int_max).all());
+    Eigen::Array3i int_min, int_max;
+    box_cell_range(aabb, int_min, int_max);
 
     const int min_z = dim == 3 ? int_min.z() : 0;
     const int max_z = dim == 3 ? int_max.z() : 0;
@@ -142,6 +215,22 @@ void HashGrid::detect_candidates(
     const auto get_item = [&](long i) -> const HashItem& {
         return i < 0 ? items0[-(i + 1)] : items1[i];
     };
+
+    // Opt-in: the exact number of (item0, item1) pairs sharing a key is
+    // known from the sorted items, before any candidate is allocated.
+    if (budget.enabled()) {
+        size_t emissions = 0;
+        for (size_t i = 0; i < num_items;) {
+            const long key = get_item(merged_item_indices[i]).key;
+            size_t n0 = 0, n1 = 0;
+            for (; i < num_items && get_item(merged_item_indices[i]).key == key;
+                 ++i) {
+                (merged_item_indices[i] < 0 ? n0 : n1)++;
+            }
+            emissions += n0 * n1;
+        }
+        check_emission_budget(emissions);
+    }
 
     // 2. Enumerate hash collisions
 #ifdef IPC_TOOLKIT_HASH_GRID_USE_SORT_UNIQUE
@@ -222,6 +311,22 @@ void HashGrid::detect_candidates(
     // hashes to the same key) and should be flagged for low-level
     // intersection testing. So we loop over the entire sorted set of
     // (key,value) pairs creating Candidate entries for pairs with the same key
+
+    // Opt-in: the exact number of item pairs sharing a key is known from
+    // the sorted items, before any candidate is allocated.
+    if (budget.enabled()) {
+        size_t emissions = 0;
+        for (size_t i = 0; i < items.size();) {
+            size_t j = i;
+            while (j < items.size() && items[j].key == items[i].key) {
+                ++j;
+            }
+            const size_t n = j - i;
+            emissions += n * (n - 1) / 2;
+            i = j;
+        }
+        check_emission_budget(emissions);
+    }
 
 #ifdef IPC_TOOLKIT_HASH_GRID_USE_SORT_UNIQUE
     tbb::enumerable_thread_specific<std::vector<Candidate>> storage;

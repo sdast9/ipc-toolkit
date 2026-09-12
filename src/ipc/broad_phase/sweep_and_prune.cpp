@@ -25,6 +25,7 @@ void SweepAndPrune::build(
     Eigen::ConstRef<Eigen::MatrixXi> faces,
     const double inflation_radius)
 {
+    check_budget_supported();
     assert(edges.size() == 0 || edges.cols() == 2);
     assert(faces.size() == 0 || faces.cols() == 3);
 
@@ -45,6 +46,7 @@ void SweepAndPrune::build(
     Eigen::ConstRef<Eigen::MatrixXi> faces,
     const double inflation_radius)
 {
+    check_budget_supported();
     assert(edges.size() == 0 || edges.cols() == 2);
     assert(faces.size() == 0 || faces.cols() == 3);
 
@@ -64,6 +66,7 @@ void SweepAndPrune::build(
     Eigen::ConstRef<Eigen::MatrixXi> faces,
     const uint8_t p_dim)
 {
+    check_budget_supported();
     assert(edges.size() == 0 || edges.cols() == 2);
     assert(faces.size() == 0 || faces.cols() == 3);
 

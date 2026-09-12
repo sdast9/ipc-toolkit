@@ -2,12 +2,47 @@
 
 #include <ipc/config.hpp>
 #include <ipc/candidates/candidates.hpp>
+#include <ipc/utils/logger.hpp> // fmt via spdlog
 #include <ipc/utils/profiler.hpp>
 
 #include <tbb/blocked_range.h>
 #include <tbb/parallel_reduce.h>
 
+#include <stdexcept>
+
 namespace ipc {
+
+BroadPhaseBudgetExceeded::BroadPhaseBudgetExceeded(
+    const std::string& _method,
+    const std::string& _quantity,
+    const size_t _requested,
+    const size_t _limit,
+    const std::string& _details)
+    : method(_method)
+    , quantity(_quantity)
+    , requested(_requested)
+    , limit(_limit)
+    , details(_details)
+    , m_what(
+          fmt::format(
+              "Broad phase resource budget exceeded before allocation: {} would need {} {} (limit {}); {}",
+              _method,
+              _requested,
+              _quantity,
+              _limit,
+              _details))
+{
+}
+
+void BroadPhase::check_budget_supported() const
+{
+    if (budget.enabled() && !supports_budget()) {
+        throw std::invalid_argument(
+            fmt::format(
+                "Broad phase method {} cannot enforce a resource budget (max_cell_items={}, max_candidate_emissions={}); use HashGrid or BruteForce, or disable the budget",
+                name(), budget.max_cell_items, budget.max_candidate_emissions));
+    }
+}
 
 void BroadPhase::build(
     Eigen::ConstRef<Eigen::MatrixXd> vertices,
@@ -16,6 +51,7 @@ void BroadPhase::build(
     const double inflation_radius)
 {
     IPC_TOOLKIT_PROFILE_BLOCK("BroadPhase::build(static)");
+    check_budget_supported();
     clear();
     dim = static_cast<uint8_t>(vertices.cols());
     build_vertex_boxes(vertices, vertex_boxes, inflation_radius);
@@ -32,6 +68,7 @@ void BroadPhase::build(
     IPC_TOOLKIT_PROFILE_BLOCK("BroadPhase::build(dynamic)");
     assert(vertices_t0.rows() == vertices_t1.rows());
     assert(vertices_t0.cols() == vertices_t1.cols());
+    check_budget_supported();
     clear();
     dim = static_cast<uint8_t>(vertices_t0.cols());
     build_vertex_boxes(
@@ -47,6 +84,7 @@ void BroadPhase::build(
 {
     IPC_TOOLKIT_PROFILE_BLOCK("BroadPhase::build(boxes)");
 
+    check_budget_supported();
     clear();
 
     assert(&(this->vertex_boxes) != &_vertex_boxes);
@@ -66,6 +104,10 @@ void BroadPhase::build(
     assert(faces.size() == 0 || faces.cols() == 3);
     build_edge_boxes(vertex_boxes, edges, edge_boxes);
     build_face_boxes(vertex_boxes, faces, face_boxes);
+    m_build_statistics = BroadPhaseBuildStatistics();
+    m_build_statistics.vertex_boxes = vertex_boxes.size();
+    m_build_statistics.edge_boxes = edge_boxes.size();
+    m_build_statistics.face_boxes = face_boxes.size();
 }
 
 void BroadPhase::clear()
@@ -74,6 +116,7 @@ void BroadPhase::clear()
     edge_boxes.clear();
     face_boxes.clear();
     dim = 0; // reset dimension
+    m_build_statistics = BroadPhaseBuildStatistics();
 }
 
 void BroadPhase::detect_collision_candidates(Candidates& candidates) const

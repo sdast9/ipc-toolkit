@@ -55,6 +55,7 @@ void SpatialHash::build(
     double inflation_radius,
     double voxel_size)
 {
+    check_budget_supported();
     clear();
     dim = static_cast<uint8_t>(vertices.cols());
     build_vertex_boxes(vertices, vertex_boxes, inflation_radius);
@@ -69,6 +70,7 @@ void SpatialHash::build(
     double inflation_radius,
     double voxel_size)
 {
+    check_budget_supported();
     clear();
     dim = static_cast<uint8_t>(vertices_t0.cols());
     build_vertex_boxes(
@@ -83,6 +85,7 @@ void SpatialHash::build(
     const uint8_t _dim,
     double voxel_size)
 {
+    check_budget_supported();
     // WARNING: Clear will reset vertex_boxes if this assert is triggered
     assert(&(this->vertex_boxes) != &_vertex_boxes);
     clear();

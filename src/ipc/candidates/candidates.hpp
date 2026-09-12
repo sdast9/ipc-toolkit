@@ -47,6 +47,24 @@ public:
     /// @return The number of collision candidates.
     size_t size() const;
 
+private:
+    /// @brief The build stages of build(static); the public build clears the
+    ///        lists on any exception so no partial candidate set survives.
+    void build_unchecked(
+        const CollisionMesh& mesh,
+        Eigen::ConstRef<Eigen::MatrixXd> vertices,
+        const double inflation_radius,
+        BroadPhase* broad_phase);
+
+    /// @brief The build stages of build(dynamic); see build_unchecked(static).
+    void build_unchecked(
+        const CollisionMesh& mesh,
+        Eigen::ConstRef<Eigen::MatrixXd> vertices_t0,
+        Eigen::ConstRef<Eigen::MatrixXd> vertices_t1,
+        const double inflation_radius,
+        BroadPhase* broad_phase);
+
+public:
     /// @brief Check if there are no collision candidates.
     /// @return True if there are no collision candidates, false otherwise.
     bool empty() const;

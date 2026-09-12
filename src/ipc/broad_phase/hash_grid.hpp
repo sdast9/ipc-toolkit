@@ -35,6 +35,11 @@ public:
 
     using BroadPhase::build;
 
+    /// @brief The hash grid enforces BroadPhaseBudget: cell items are counted
+    ///        from the boxes before insertion, pair emissions from the sorted
+    ///        items before enumeration.
+    bool supports_budget() const override { return true; }
+
     /// @brief Clear the hash grid.
     void clear() override
     {
@@ -100,6 +105,24 @@ protected:
     /// @brief Add an AABB of the extents to the hash grid.
     void insert_box(
         const AABB& aabb, const long id, std::vector<HashItem>& items) const;
+
+    /// @brief Inclusive cell index range an AABB covers (clamped to the grid).
+    ///        Shared by insert_box and the pre-insertion item count so the
+    ///        count is exactly the number of items insert_box emits.
+    void box_cell_range(
+        const AABB& aabb,
+        Eigen::Array3i& int_min,
+        Eigen::Array3i& int_max) const;
+
+    /// @brief Number of items insert_box would emit for the boxes (no allocation).
+    size_t count_cell_items(const AABBs& boxes) const;
+
+    /// @brief Check the cell-item budget from the boxes, before any item is inserted.
+    void check_cell_item_budget() const;
+
+    /// @brief Check the emission budget of one detect call from the sorted items.
+    /// @param emissions Exact pre-filter pair count of the enumeration.
+    void check_emission_budget(const size_t emissions) const;
 
     /// @brief Create the hash of a cell location.
     long hash(int x, int y, int z) const

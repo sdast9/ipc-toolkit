@@ -11,9 +11,81 @@
 
 #include <Eigen/Core>
 
+#include <array>
+#include <exception>
+#include <string>
+
 namespace ipc {
 
 class Candidates; // Forward declaration
+
+/// @brief Opt-in bounds on the intermediate buffers a broad phase allocates
+///        while detecting candidates. Zero means unlimited (the default), so
+///        the default path is unchanged. Each bound is checked from the
+///        boxes or the already-built items BEFORE the buffer it bounds is
+///        allocated; a violation throws BroadPhaseBudgetExceeded and no
+///        candidate set is produced (Candidates::build clears its output).
+///        Only methods for which supports_budget() is true can enforce a
+///        budget (HashGrid, BruteForce); setting one on another method is an
+///        error, never a silent no-op.
+struct BroadPhaseBudget {
+    /// @brief HashGrid: total number of (box, cell) items over the vertex,
+    ///        edge and face boxes of one build (16 bytes each, plus 8 bytes
+    ///        per item of merge indices during candidate detection).
+    size_t max_cell_items = 0;
+    /// @brief Pair emissions of ONE detect_*_candidates call before the
+    ///        collision filter, the AABB test and the unique pass: the exact
+    ///        number of item pairs sharing a cell (HashGrid) or of box pairs
+    ///        compared (BruteForce). Every candidate buffer of that call is
+    ///        at most this many entries.
+    size_t max_candidate_emissions = 0;
+
+    bool enabled() const
+    {
+        return max_cell_items > 0 || max_candidate_emissions > 0;
+    }
+};
+
+/// @brief Thrown by a broad phase when a BroadPhaseBudget bound would be
+///        exceeded, before the corresponding allocation.
+/// @note Deliberately not a std::runtime_error: solver-level handlers that
+///       treat a runtime_error as a step failure to retry with a smaller
+///       step or a scaled weight must not absorb a resource failure.
+class BroadPhaseBudgetExceeded : public std::exception {
+public:
+    BroadPhaseBudgetExceeded(
+        const std::string& method,
+        const std::string& quantity,
+        const size_t requested,
+        const size_t limit,
+        const std::string& details);
+
+    const char* what() const noexcept override { return m_what.c_str(); }
+
+    std::string method;   ///< Broad phase method name
+    std::string quantity; ///< "cell_items" or "candidate_emissions"
+    size_t requested;     ///< Exact count the build would have allocated
+    size_t limit;         ///< The configured bound
+    std::string details;  ///< Sizes behind the count (boxes, grid, cell size)
+
+private:
+    std::string m_what;
+};
+
+/// @brief Measured sizes of the last build's intermediates. Counts a method
+///        does not measure stay zero; `measured` says whether anything was.
+struct BroadPhaseBuildStatistics {
+    bool measured = false;
+    size_t vertex_boxes = 0, edge_boxes = 0, face_boxes = 0;
+    /// @brief HashGrid: (box, cell) items actually inserted.
+    size_t cell_items = 0;
+    /// @brief Sum over the detect calls of this build of their pre-filter
+    ///        pair emissions; counted only while a budget is enabled.
+    size_t candidate_emissions = 0;
+    /// @brief HashGrid: cell size and grid dimensions.
+    double cell_size = 0;
+    std::array<long, 3> grid_size = { { 0, 0, 0 } };
+};
 
 /// @brief Base class for broad phase collision detection methods.
 class BroadPhase {
@@ -99,6 +171,32 @@ public:
     /// @brief Filter for determining if two vertices can collide.
     CollisionFilter can_vertices_collide;
 
+    /// @brief Opt-in resource budget (see BroadPhaseBudget); unlimited by default.
+    BroadPhaseBudget budget;
+
+    /// @brief Can this method enforce a BroadPhaseBudget before allocating?
+    virtual bool supports_budget() const { return false; }
+
+    /// @brief Throw std::invalid_argument if a budget is set on a method that
+    ///        cannot enforce it (an unsupported budget is never a silent
+    ///        no-op).
+    void check_budget_supported() const;
+
+    /// @brief Measured intermediates of the last build (see BroadPhaseBuildStatistics).
+    ///        After Candidates::build they are the sums over its sub-builds
+    ///        (the main pass and the codimensional passes).
+    const BroadPhaseBuildStatistics& build_statistics() const
+    {
+        return m_build_statistics;
+    }
+
+    /// @brief Replace the statistics (Candidates::build sums its sub-builds,
+    ///        each of which reset them through clear()).
+    void set_build_statistics(const BroadPhaseBuildStatistics& statistics)
+    {
+        m_build_statistics = statistics;
+    }
+
 protected:
     /// @brief Build the broad phase for collision detection.
     /// @note Assumes the vertex_boxes have been built.
@@ -130,6 +228,9 @@ protected:
 
     /// @brief Dimension of the simulation for which the broad phase was built.
     uint8_t dim = 0;
+
+    /// @brief Statistics of the last build; reset by build().
+    mutable BroadPhaseBuildStatistics m_build_statistics;
 };
 
 } // namespace ipc

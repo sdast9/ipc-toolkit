@@ -1,5 +1,6 @@
 #include "brute_force.hpp"
 
+#include <ipc/utils/logger.hpp>
 #include <ipc/utils/merge_thread_local.hpp>
 
 #include <tbb/blocked_range2d.h>
@@ -19,6 +20,26 @@ void BruteForce::detect_candidates(
     const std::function<bool(size_t, size_t)>& can_collide,
     std::vector<Candidate>& candidates) const
 {
+    // Opt-in: the number of box pairs this call compares bounds every
+    // candidate buffer it allocates, and is known before the loop.
+    if (budget.enabled()) {
+        const size_t emissions = triangular
+            ? boxes0.size() * (boxes0.size() - (boxes0.empty() ? 0 : 1)) / 2
+            : boxes0.size() * boxes1.size();
+        m_build_statistics.measured = true;
+        m_build_statistics.candidate_emissions += emissions;
+        if (budget.max_candidate_emissions > 0
+            && emissions > budget.max_candidate_emissions) {
+            throw BroadPhaseBudgetExceeded(
+                name(), "candidate_emissions", emissions,
+                budget.max_candidate_emissions,
+                fmt::format(
+                    "box pairs compared in one detect call ({} x {} boxes{})",
+                    boxes0.size(), boxes1.size(),
+                    triangular ? ", unordered pairs within one set" : ""));
+        }
+    }
+
     tbb::enumerable_thread_specific<std::vector<Candidate>> storage;
 
     tbb::parallel_for(

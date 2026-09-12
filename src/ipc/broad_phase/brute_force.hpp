@@ -13,6 +13,12 @@ public:
     /// @return The name of the broad phase method.
     std::string name() const override { return "BruteForce"; }
 
+    /// @brief Brute force enforces BroadPhaseBudget::max_candidate_emissions:
+    ///        every detect call compares at most |boxes0| x |boxes1| pairs
+    ///        (n(n-1)/2 within one set), known before any candidate is
+    ///        allocated. It allocates no cell items.
+    bool supports_budget() const override { return true; }
+
     /// @brief Find the candidate vertex-vertex collisions.
     /// @param[out] candidates The candidate vertex-vertex collisions.
     void detect_vertex_vertex_candidates(
