@@ -1,8 +1,11 @@
 name: Build
 
 on:
+  # The fork's maintained branch is semi-implicit-stiffness (PolyFEM pins its
+  # commits); it is checked like main, and a run can be started by hand.
+  workflow_dispatch:
   push:
-    branches: [main]
+    branches: [main, semi-implicit-stiffness]
   pull_request:
     paths:
       - '.github/workflows/continuous.yml'
