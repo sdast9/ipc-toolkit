@@ -17,19 +17,39 @@ BroadPhaseBudgetExceeded::BroadPhaseBudgetExceeded(
     const std::string& _quantity,
     const size_t _requested,
     const size_t _limit,
-    const std::string& _details)
+    const std::string& _details,
+    const bool _exact)
     : method(_method)
     , quantity(_quantity)
     , requested(_requested)
     , limit(_limit)
     , details(_details)
+    , exact(_exact)
     , m_what(
           fmt::format(
-              "Broad phase resource budget exceeded before allocation: {} would need {} {} (limit {}); {}",
+              "Broad phase resource budget exceeded before allocation: {} would need {}{} {} (limit {}{}); {}",
               _method,
+              _exact ? "" : "at least ",
               _requested,
               _quantity,
               _limit,
+              _exact ? "" : "; the exact count is not representable in 64 bits",
+              _details))
+{
+}
+
+BroadPhaseUnrepresentable::BroadPhaseUnrepresentable(
+    const std::string& _method,
+    const std::string& _quantity,
+    const std::string& _details)
+    : method(_method)
+    , quantity(_quantity)
+    , details(_details)
+    , m_what(
+          fmt::format(
+              "Broad phase cannot represent this build ({} {}): {}",
+              _method,
+              _quantity,
               _details))
 {
 }
@@ -143,11 +163,15 @@ void BroadPhase::compute_mesh_aabb(
     struct MeshDomain {
         Eigen::Array3d min;
         Eigen::Array3d max;
+        // A NaN box is masked by the min/max reduction unless it is first:
+        // record non-finite boxes separately (finite edge and face boxes
+        // follow from finite vertex boxes, they are unions of them).
+        bool finite;
     };
 
     MeshDomain domain {
         Eigen::Array3d::Constant(std::numeric_limits<double>::max()),
-        Eigen::Array3d::Constant(std::numeric_limits<double>::lowest())
+        Eigen::Array3d::Constant(std::numeric_limits<double>::lowest()), true
     };
 
     domain = tbb::parallel_reduce(
@@ -156,12 +180,23 @@ void BroadPhase::compute_mesh_aabb(
             for (size_t i = r.begin(); i != r.end(); ++i) {
                 local.min = local.min.min(vertex_boxes[i].min);
                 local.max = local.max.max(vertex_boxes[i].max);
+                local.finite = local.finite
+                    && vertex_boxes[i].min.isFinite().all()
+                    && vertex_boxes[i].max.isFinite().all();
             }
             return local;
         },
         [](const MeshDomain& a, const MeshDomain& b) {
-            return MeshDomain { a.min.min(b.min), a.max.max(b.max) };
+            return MeshDomain { a.min.min(b.min), a.max.max(b.max),
+                                a.finite && b.finite };
         });
+
+    if (!domain.finite) {
+        throw std::invalid_argument(
+            fmt::format(
+                "{} broad phase: a vertex box is not finite (a NaN or infinite vertex position among {} vertices)",
+                name(), vertex_boxes.size()));
+    }
 
     mesh_min = domain.min;
     mesh_max = domain.max;

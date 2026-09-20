@@ -12,6 +12,9 @@
 #include <tbb/parallel_sort.h>
 
 #include <algorithm> // std::min/max
+#include <cmath>
+#include <limits>
+#include <stdexcept>
 
 #define IPC_TOOLKIT_HASH_GRID_USE_SORT_UNIQUE // else use unordered_set
 
@@ -51,37 +54,52 @@ void HashGrid::build(
 void HashGrid::box_cell_range(
     const AABB& aabb, Eigen::Array3i& int_min, Eigen::Array3i& int_max) const
 {
-    int_min = ((aabb.min - domain_min()) / cell_size()).cast<int>();
-    // We can round down to -1, but not less
-    assert((int_min >= -1).all());
-    assert((int_min <= grid_size()).all());
-    int_min = int_min.max(0).min(grid_size() - 1);
+    const Eigen::Array3d lo = (aabb.min - domain_min()) / cell_size();
+    const Eigen::Array3d hi = (aabb.max - domain_min()) / cell_size();
 
-    int_max = ((aabb.max - domain_min()) / cell_size()).cast<int>();
-    assert((int_max >= -1).all());
-    assert((int_max <= grid_size()).all());
-    int_max = int_max.max(0).min(grid_size() - 1);
+    // A box built from the same vertex boxes as the domain lies in
+    // [0, grid_size] (we can round down to -1, but not less, and up to the
+    // far border, but not beyond). Anything else -- in particular a
+    // non-finite box, which fails every comparison -- must not reach the
+    // conversion to int below, whose result would be undefined.
+    const Eigen::Array3d upper = grid_size().cast<double>();
+    if (!((lo >= -1.0).all() && (lo <= upper).all() && (hi >= -1.0).all()
+          && (hi <= upper).all())) {
+        throw std::invalid_argument(
+            fmt::format(
+                "{} broad phase: box [{:g} {:g} {:g}]-[{:g} {:g} {:g}] is not finite or lies outside the grid domain [{:g} {:g} {:g}]-[{:g} {:g} {:g}]",
+                name(), aabb.min.x(), aabb.min.y(), aabb.min.z(), aabb.max.x(),
+                aabb.max.y(), aabb.max.z(), domain_min().x(), domain_min().y(),
+                domain_min().z(), domain_max().x(), domain_max().y(),
+                domain_max().z()));
+    }
+
+    int_min = lo.cast<int>().max(0).min(grid_size() - 1);
+    int_max = hi.cast<int>().max(0).min(grid_size() - 1);
     assert((int_min <= int_max).all());
 }
 
-size_t HashGrid::count_cell_items(const AABBs& boxes) const
+CheckedCount HashGrid::count_cell_items(const AABBs& boxes) const
 {
+    // Saturating addition with a sticky overflow flag is associative and
+    // commutative, so the reduction's result does not depend on how TBB
+    // partitions the range or on the number of threads.
     return tbb::parallel_reduce(
-        tbb::blocked_range<size_t>(0, boxes.size()), size_t(0),
-        [&](const tbb::blocked_range<size_t>& r, size_t total) {
+        tbb::blocked_range<size_t>(0, boxes.size()), CheckedCount(),
+        [&](const tbb::blocked_range<size_t>& r, CheckedCount total) {
             Eigen::Array3i int_min, int_max;
             for (size_t i = r.begin(); i != r.end(); ++i) {
                 box_cell_range(boxes[i], int_min, int_max);
-                size_t cells = size_t(int_max.x() - int_min.x() + 1)
-                    * size_t(int_max.y() - int_min.y() + 1);
-                if (dim == 3) {
-                    cells *= size_t(int_max.z() - int_min.z() + 1);
-                }
-                total += cells;
+                // Each extent is at most INT_MAX cells (resize), so these
+                // products fit; the sum over the boxes need not.
+                total += CheckedCount::product(
+                    size_t(int_max.x() - int_min.x() + 1),
+                    size_t(int_max.y() - int_min.y() + 1),
+                    dim == 3 ? size_t(int_max.z() - int_min.z() + 1) : 1);
             }
             return total;
         },
-        std::plus<size_t>());
+        [](const CheckedCount& a, const CheckedCount& b) { return a + b; });
 }
 
 void HashGrid::check_cell_item_budget() const
@@ -89,31 +107,34 @@ void HashGrid::check_cell_item_budget() const
     if (budget.max_cell_items == 0) {
         return;
     }
-    const size_t items = count_cell_items(vertex_boxes)
+    const CheckedCount items = count_cell_items(vertex_boxes)
         + count_cell_items(edge_boxes) + count_cell_items(face_boxes);
-    if (items > budget.max_cell_items) {
+    if (items.exceeds(budget.max_cell_items)) {
+        const CheckedCount bytes = items.times(sizeof(HashItem));
         throw BroadPhaseBudgetExceeded(
-            name(), "cell_items", items, budget.max_cell_items,
+            name(), "cell_items", items.value, budget.max_cell_items,
             fmt::format(
-                "{} vertex, {} edge and {} face boxes over a {}x{}x{} grid of cell size {:g} ({} bytes of items)",
+                "{} vertex, {} edge and {} face boxes over a {}x{}x{} grid of cell size {:g} ({}{} bytes of items)",
                 vertex_boxes.size(), edge_boxes.size(), face_boxes.size(),
                 grid_size()[0], grid_size()[1], grid_size()[2], cell_size(),
-                items * sizeof(HashItem)));
+                bytes.exact() ? "" : "more than ", bytes.value),
+            items.exact());
     }
 }
 
-void HashGrid::check_emission_budget(const size_t emissions) const
+void HashGrid::check_emission_budget(const CheckedCount& emissions) const
 {
-    m_build_statistics.candidate_emissions += emissions;
+    m_build_statistics.add_candidate_emissions(emissions);
     if (budget.max_candidate_emissions > 0
-        && emissions > budget.max_candidate_emissions) {
+        && emissions.exceeds(budget.max_candidate_emissions)) {
         throw BroadPhaseBudgetExceeded(
-            name(), "candidate_emissions", emissions,
+            name(), "candidate_emissions", emissions.value,
             budget.max_candidate_emissions,
             fmt::format(
                 "item pairs sharing a cell in one detect call before filtering and deduplication; {} vertex, {} edge and {} face items over a {}x{}x{} grid of cell size {:g}",
                 vertex_items.size(), edge_items.size(), face_items.size(),
-                grid_size()[0], grid_size()[1], grid_size()[2], cell_size()));
+                grid_size()[0], grid_size()[1], grid_size()[2], cell_size()),
+            emissions.exact());
     }
 }
 
@@ -122,14 +143,53 @@ void HashGrid::resize(
     Eigen::ConstRef<Eigen::Array3d> domain_max,
     const double cell_size)
 {
-    assert(cell_size > 0.0);
-    assert(std::isfinite(cell_size));
+    // Everything below is validated on the floating-point values before
+    // any conversion to an integer: a conversion of a non-finite or
+    // out-of-range value is undefined behavior, and release builds have no
+    // assertions to catch it.
+    if (!(cell_size > 0.0) || !std::isfinite(cell_size)) {
+        throw std::invalid_argument(
+            fmt::format(
+                "{} broad phase: cell size {:g} is not a positive finite number",
+                name(), cell_size));
+    }
+    const Eigen::Array3d extent = domain_max - domain_min;
+    if (!extent.isFinite().all() || (extent < 0.0).any()) {
+        throw std::invalid_argument(
+            fmt::format(
+                "{} broad phase: the mesh bounding box [{:g} {:g} {:g}]-[{:g} {:g} {:g}] is not finite",
+                name(), domain_min.x(), domain_min.y(), domain_min.z(),
+                domain_max.x(), domain_max.y(), domain_max.z()));
+    }
+
+    // Cells per axis as doubles (the division can overflow to infinity),
+    // then their product in checked integer arithmetic against the key
+    // type, which hash() indexes the cells with.
+    const Eigen::Array3d cells = (extent / cell_size).ceil().max(1.0);
+    const double max_axis = double(std::numeric_limits<int>::max());
+    if (!cells.isFinite().all() || (cells > max_axis).any()) {
+        throw BroadPhaseUnrepresentable(
+            name(), "grid_cells",
+            fmt::format(
+                "{:g} x {:g} x {:g} cells of size {:g} over an extent of {:g} x {:g} x {:g}: more than {} cells along an axis",
+                cells.x(), cells.y(), cells.z(), cell_size, extent.x(),
+                extent.y(), extent.z(), std::numeric_limits<int>::max()));
+    }
+    const CheckedCount total = CheckedCount::product(
+        size_t(cells.x()), size_t(cells.y()), size_t(cells.z()));
+    if (total.exceeds(size_t(std::numeric_limits<long>::max()))) {
+        throw BroadPhaseUnrepresentable(
+            name(), "grid_cells",
+            fmt::format(
+                "{:g} x {:g} x {:g} cells of size {:g} over an extent of {:g} x {:g} x {:g}: more than the {} cells a hash key can index on this platform",
+                cells.x(), cells.y(), cells.z(), cell_size, extent.x(),
+                extent.y(), extent.z(), std::numeric_limits<long>::max()));
+    }
 
     m_domain_min = domain_min;
     m_domain_max = domain_max;
     m_cell_size = cell_size;
-    m_grid_size =
-        ((domain_max - domain_min) / cell_size).ceil().cast<int>().max(1);
+    m_grid_size = cells.cast<int>();
 
     logger().trace(
         "hash-grid resized with a size of {:d}x{:d}x{:d}", grid_size()[0],
@@ -219,7 +279,7 @@ void HashGrid::detect_candidates(
     // Opt-in: the exact number of (item0, item1) pairs sharing a key is
     // known from the sorted items, before any candidate is allocated.
     if (budget.enabled()) {
-        size_t emissions = 0;
+        CheckedCount emissions;
         for (size_t i = 0; i < num_items;) {
             const long key = get_item(merged_item_indices[i]).key;
             size_t n0 = 0, n1 = 0;
@@ -227,7 +287,7 @@ void HashGrid::detect_candidates(
                  ++i) {
                 (merged_item_indices[i] < 0 ? n0 : n1)++;
             }
-            emissions += n0 * n1;
+            emissions += CheckedCount::product(n0, n1);
         }
         check_emission_budget(emissions);
     }
@@ -315,14 +375,13 @@ void HashGrid::detect_candidates(
     // Opt-in: the exact number of item pairs sharing a key is known from
     // the sorted items, before any candidate is allocated.
     if (budget.enabled()) {
-        size_t emissions = 0;
+        CheckedCount emissions;
         for (size_t i = 0; i < items.size();) {
             size_t j = i;
             while (j < items.size() && items[j].key == items[i].key) {
                 ++j;
             }
-            const size_t n = j - i;
-            emissions += n * (n - 1) / 2;
+            emissions += CheckedCount::unordered_pairs(j - i);
             i = j;
         }
         check_emission_budget(emissions);

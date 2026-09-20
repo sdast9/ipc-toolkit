@@ -6,13 +6,14 @@ namespace ipc {
 
 /// @brief An entry into the hash grid as a (key, value) pair.
 struct HashItem {
-    /// @brief The key of the item.
+    /// @brief The key of the item (a cell index; HashGrid::resize refuses a
+    ///        grid with more cells than this type holds).
     long key;
     /// @brief The value of the item.
     long id;
 
     /// @brief Construct a hash item as a (key, value) pair.
-    HashItem(int _key, int _id) : key(_key), id(_id) { }
+    HashItem(long _key, long _id) : key(_key), id(_id) { }
 
     /// @brief Compare HashItems by their keys for sorting.
     bool operator<(const HashItem& other) const
@@ -93,6 +94,13 @@ protected:
         Eigen::ConstRef<Eigen::MatrixXi> edges,
         Eigen::ConstRef<Eigen::MatrixXi> faces) override;
 
+    /// @brief Size the grid over [domain_min, domain_max] with cubic cells.
+    /// @throws std::invalid_argument if the cell size is not a positive
+    ///         finite number or the domain is not finite.
+    /// @throws BroadPhaseUnrepresentable if the grid would have more than
+    ///         INT_MAX cells along an axis or more cells in total than a
+    ///         hash key (long) can index — checked in integer arithmetic
+    ///         before any floating-point-to-integer conversion.
     void resize(
         Eigen::ConstRef<Eigen::Array3d> domain_min,
         Eigen::ConstRef<Eigen::Array3d> domain_max,
@@ -109,29 +117,37 @@ protected:
     /// @brief Inclusive cell index range an AABB covers (clamped to the grid).
     ///        Shared by insert_box and the pre-insertion item count so the
     ///        count is exactly the number of items insert_box emits.
+    /// @throws std::invalid_argument if the box is not finite or lies
+    ///         outside the grid's domain (checked on the floating-point
+    ///         coordinates, before the conversion to cell indices).
     void box_cell_range(
         const AABB& aabb,
         Eigen::Array3i& int_min,
         Eigen::Array3i& int_max) const;
 
-    /// @brief Number of items insert_box would emit for the boxes (no allocation).
-    size_t count_cell_items(const AABBs& boxes) const;
+    /// @brief Number of items insert_box would emit for the boxes (no
+    ///        allocation). Checked arithmetic: an overflowing sum is
+    ///        reported as such, never wrapped.
+    CheckedCount count_cell_items(const AABBs& boxes) const;
 
     /// @brief Check the cell-item budget from the boxes, before any item is inserted.
     void check_cell_item_budget() const;
 
     /// @brief Check the emission budget of one detect call from the sorted items.
-    /// @param emissions Exact pre-filter pair count of the enumeration.
-    void check_emission_budget(const size_t emissions) const;
+    /// @param emissions Pre-filter pair count of the enumeration (exact, or
+    ///        saturated with its overflow flag set).
+    void check_emission_budget(const CheckedCount& emissions) const;
 
-    /// @brief Create the hash of a cell location.
+    /// @brief Create the hash of a cell location: its row-major cell index,
+    ///        computed in the key type. resize() guarantees the grid's cell
+    ///        count fits a long, so this cannot overflow.
     long hash(int x, int y, int z) const
     {
         assert(x >= 0 && y >= 0 && z >= 0);
         assert(
             x < grid_size()[0] && y < grid_size()[1]
             && (grid_size().size() == 2 || z < grid_size()[2]));
-        return (z * grid_size()[1] + y) * grid_size()[0] + x;
+        return (long(z) * grid_size()[1] + y) * grid_size()[0] + x;
     }
 
 private:

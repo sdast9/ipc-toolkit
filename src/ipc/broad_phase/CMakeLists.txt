@@ -5,6 +5,7 @@ set(SOURCES
   broad_phase.hpp
   brute_force.cpp
   brute_force.hpp
+  checked_count.hpp
   create_broad_phase.cpp
   create_broad_phase.hpp
   default_broad_phase.hpp

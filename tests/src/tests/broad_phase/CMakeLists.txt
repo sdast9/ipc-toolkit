@@ -3,6 +3,7 @@ set(SOURCES
   test_aabb.cpp
   test_broad_phase.cpp
   test_budget.cpp
+  test_checked_count.cpp
   test_lbvh.cpp
   test_spatial_hash.cpp
   test_stq.cpp

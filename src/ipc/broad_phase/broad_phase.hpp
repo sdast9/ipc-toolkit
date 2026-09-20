@@ -2,6 +2,7 @@
 
 #include <ipc/collision_mesh.hpp>
 #include <ipc/broad_phase/aabb.hpp>
+#include <ipc/broad_phase/checked_count.hpp>
 #include <ipc/candidates/edge_edge.hpp>
 #include <ipc/candidates/edge_face.hpp>
 #include <ipc/candidates/edge_vertex.hpp>
@@ -51,6 +52,9 @@ struct BroadPhaseBudget {
 /// @note Deliberately not a std::runtime_error: solver-level handlers that
 ///       treat a runtime_error as a step failure to retry with a smaller
 ///       step or a scaled weight must not absorb a resource failure.
+/// @note The counts behind the decision are CheckedCount arithmetic: a
+///       count that does not fit size_t is reported as `requested` =
+///       SIZE_MAX with `exact` false ("at least"), never as a wrapped value.
 class BroadPhaseBudgetExceeded : public std::exception {
 public:
     BroadPhaseBudgetExceeded(
@@ -58,15 +62,46 @@ public:
         const std::string& quantity,
         const size_t requested,
         const size_t limit,
-        const std::string& details);
+        const std::string& details,
+        const bool exact = true);
 
     const char* what() const noexcept override { return m_what.c_str(); }
 
     std::string method;   ///< Broad phase method name
     std::string quantity; ///< "cell_items" or "candidate_emissions"
-    size_t requested;     ///< Exact count the build would have allocated
-    size_t limit;         ///< The configured bound
-    std::string details;  ///< Sizes behind the count (boxes, grid, cell size)
+    /// @brief Count the build would have allocated; if !exact, SIZE_MAX
+    ///        standing for "at least SIZE_MAX".
+    size_t requested;
+    size_t limit;        ///< The configured bound
+    std::string details; ///< Sizes behind the count (boxes, grid, cell size)
+    bool exact;          ///< Is `requested` the exact count?
+
+private:
+    std::string m_what;
+};
+
+/// @brief Thrown by a broad phase whose index or key arithmetic cannot
+///        represent the requested build — a hash grid with more cells than
+///        its key type holds, or more cells along an axis than an int —
+///        before any conversion or allocation. Raised whether or not a
+///        BroadPhaseBudget is set: a disabled budget is a policy about
+///        memory, not a license for wrapped index arithmetic.
+/// @note Like BroadPhaseBudgetExceeded, deliberately not a
+///       std::runtime_error (a containment stop the solver's retry handlers
+///       must not absorb). Non-finite input, by contrast, is a
+///       std::invalid_argument.
+class BroadPhaseUnrepresentable : public std::exception {
+public:
+    BroadPhaseUnrepresentable(
+        const std::string& method,
+        const std::string& quantity,
+        const std::string& details);
+
+    const char* what() const noexcept override { return m_what.c_str(); }
+
+    std::string method;   ///< Broad phase method name
+    std::string quantity; ///< What cannot be represented ("grid_cells")
+    std::string details;  ///< The sizes and the platform limit
 
 private:
     std::string m_what;
@@ -81,10 +116,31 @@ struct BroadPhaseBuildStatistics {
     size_t cell_items = 0;
     /// @brief Sum over the detect calls of this build of their pre-filter
     ///        pair emissions; counted only while a budget is enabled.
+    ///        Saturates at SIZE_MAX (see candidate_emissions_overflowed).
     size_t candidate_emissions = 0;
+    /// @brief True if candidate_emissions saturated: the true sum exceeds
+    ///        SIZE_MAX and the stored value is a lower bound.
+    bool candidate_emissions_overflowed = false;
     /// @brief HashGrid: cell size and grid dimensions.
     double cell_size = 0;
     std::array<long, 3> grid_size = { { 0, 0, 0 } };
+
+    /// @brief The emissions as a CheckedCount (value + overflow flag).
+    CheckedCount candidate_emission_count() const
+    {
+        CheckedCount count(candidate_emissions);
+        count.overflowed = candidate_emissions_overflowed;
+        return count;
+    }
+
+    /// @brief Add the emissions of one detect call (or of one sub-build)
+    ///        with saturation.
+    void add_candidate_emissions(const CheckedCount& emissions)
+    {
+        const CheckedCount total = candidate_emission_count() + emissions;
+        candidate_emissions = total.value;
+        candidate_emissions_overflowed = total.overflowed;
+    }
 };
 
 /// @brief Base class for broad phase collision detection methods.
@@ -207,6 +263,11 @@ protected:
         Eigen::ConstRef<Eigen::MatrixXi> faces);
 
     /// @brief Compute the axis-aligned bounding box (AABB) of the mesh.
+    /// @throws std::invalid_argument if a vertex box is not finite (a NaN
+    ///         or infinite vertex position): the grid-based methods convert
+    ///         box coordinates to integers, which a non-finite value cannot
+    ///         reach, and a non-finite box would otherwise be silently
+    ///         masked by the min/max reduction.
     /// @param[out] mesh_min Minimum corner of the mesh AABB.
     /// @param[out] mesh_max Maximum corner of the mesh AABB.
     void compute_mesh_aabb(

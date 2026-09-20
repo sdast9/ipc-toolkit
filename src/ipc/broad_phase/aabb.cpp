@@ -1,10 +1,12 @@
 #include "aabb.hpp"
 
+#include <ipc/utils/logger.hpp> // fmt via spdlog
 #include <ipc/utils/profiler.hpp>
 
 #include <tbb/parallel_for.h>
 
 #include <cfenv>
+#include <stdexcept>
 
 namespace ipc {
 
@@ -54,12 +56,31 @@ void AABB::conservative_inflation(
     });
 }
 
+namespace {
+    // A NaN coordinate is masked by the min/max that builds a box from two
+    // points (Eigen's min/max keep the other operand), so a non-finite
+    // position has to be refused here, before it becomes a finite-looking
+    // box that the grid-based methods convert to cell indices.
+    void
+    require_finite(Eigen::ConstRef<Eigen::MatrixXd> vertices, const char* which)
+    {
+        if (!vertices.allFinite()) {
+            throw std::invalid_argument(
+                fmt::format(
+                    "build_vertex_boxes: {} contain a NaN or infinite coordinate ({} vertices)",
+                    which, vertices.rows()));
+        }
+    }
+} // namespace
+
 void build_vertex_boxes(
     Eigen::ConstRef<Eigen::MatrixXd> vertices,
     AABBs& vertex_boxes,
     const double inflation_radius)
 {
     IPC_TOOLKIT_PROFILE_BLOCK("build_vertex_boxes");
+
+    require_finite(vertices, "the vertex positions");
 
     vertex_boxes.resize(vertices.rows());
 
@@ -76,6 +97,9 @@ void build_vertex_boxes(
     const double inflation_radius)
 {
     IPC_TOOLKIT_PROFILE_BLOCK("build_vertex_boxes");
+
+    require_finite(vertices_t0, "the starting vertex positions");
+    require_finite(vertices_t1, "the ending vertex positions");
 
     vertex_boxes.resize(vertices_t0.rows());
 

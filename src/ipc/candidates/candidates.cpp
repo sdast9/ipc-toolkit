@@ -36,7 +36,7 @@ namespace {
         total.edge_boxes += s.edge_boxes;
         total.face_boxes += s.face_boxes;
         total.cell_items += s.cell_items;
-        total.candidate_emissions += s.candidate_emissions;
+        total.add_candidate_emissions(s.candidate_emission_count());
         if (total.cell_size == 0) { // the main pass sizes the grid
             total.cell_size = s.cell_size;
             total.grid_size = s.grid_size;

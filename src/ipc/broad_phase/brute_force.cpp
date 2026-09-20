@@ -21,22 +21,24 @@ void BruteForce::detect_candidates(
     std::vector<Candidate>& candidates) const
 {
     // Opt-in: the number of box pairs this call compares bounds every
-    // candidate buffer it allocates, and is known before the loop.
+    // candidate buffer it allocates, and is known before the loop (checked
+    // arithmetic: a count beyond size_t is reported as such, not wrapped).
     if (budget.enabled()) {
-        const size_t emissions = triangular
-            ? boxes0.size() * (boxes0.size() - (boxes0.empty() ? 0 : 1)) / 2
-            : boxes0.size() * boxes1.size();
+        const CheckedCount emissions = triangular
+            ? CheckedCount::unordered_pairs(boxes0.size())
+            : CheckedCount::product(boxes0.size(), boxes1.size());
         m_build_statistics.measured = true;
-        m_build_statistics.candidate_emissions += emissions;
+        m_build_statistics.add_candidate_emissions(emissions);
         if (budget.max_candidate_emissions > 0
-            && emissions > budget.max_candidate_emissions) {
+            && emissions.exceeds(budget.max_candidate_emissions)) {
             throw BroadPhaseBudgetExceeded(
-                name(), "candidate_emissions", emissions,
+                name(), "candidate_emissions", emissions.value,
                 budget.max_candidate_emissions,
                 fmt::format(
                     "box pairs compared in one detect call ({} x {} boxes{})",
                     boxes0.size(), boxes1.size(),
-                    triangular ? ", unordered pairs within one set" : ""));
+                    triangular ? ", unordered pairs within one set" : ""),
+                emissions.exact());
         }
     }
 

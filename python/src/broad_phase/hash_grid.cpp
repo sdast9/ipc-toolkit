@@ -8,7 +8,7 @@ void define_hash_grid(py::module_& m)
 {
     py::class_<HashItem>(m, "HashItem")
         .def(
-            py::init<int, int>(),
+            py::init<long, long>(),
             "Construct a hash item as a (key, value) pair.", "key"_a, "id"_a)
         .def(
             "__lt__", &HashItem::operator<,

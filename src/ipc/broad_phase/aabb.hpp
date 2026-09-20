@@ -73,6 +73,8 @@ public:
 using AABBs = std::vector<AABB, DefaultInitAllocator<AABB>>;
 
 /// @brief Build one AABB per vertex position (row of V).
+/// @throws std::invalid_argument if a position is not finite (a NaN would
+///         otherwise be masked into a finite-looking box).
 /// @param[in] vertices Vertex positions (rowwise).
 /// @param[out] vertex_boxes Vertex AABBs.
 /// @param[in] inflation_radius Radius of a sphere around the points which the AABBs enclose.
