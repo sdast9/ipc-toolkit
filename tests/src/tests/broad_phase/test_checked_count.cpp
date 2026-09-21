@@ -19,6 +19,7 @@
 #include <cmath>
 #include <limits>
 #include <stdexcept>
+#include <string>
 #include <type_traits>
 
 using namespace ipc;
@@ -266,9 +267,12 @@ TEST_CASE(
             CHECK(e.exact);
             CHECK_THAT(
                 e.what(), !Catch::Matchers::ContainsSubstring("at least"));
+            // The byte estimate is items * sizeof(HashItem): 16 bytes per
+            // item on LP64, 8 on LLP64 (two longs).
             CHECK_THAT(
                 e.what(),
-                Catch::Matchers::ContainsSubstring("17179869184 bytes"));
+                Catch::Matchers::ContainsSubstring(
+                    std::to_string(two_pow(30) * sizeof(HashItem)) + " bytes"));
         }
     }
     if (!KEY_IS_64_BIT) {
