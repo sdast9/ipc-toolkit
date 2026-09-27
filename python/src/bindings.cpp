@@ -32,6 +32,12 @@ PYBIND11_MODULE(ipctk, m)
     define_sweep_and_tiniest_queue(m);
     define_voxel_size_heuristic(m);
 
+    // GPU implementations, mirroring the C++ ipc::cuda namespace. The submodule
+    // always exists; its classes are defined only in CUDA builds.
+    py::module_ cuda = m.def_submodule(
+        "cuda", "GPU (CUDA) implementations; populated only in CUDA builds.");
+    define_cuda_lbvh(cuda);
+
     // candidates
     define_candidates(m);
     define_collision_stencil(m);
@@ -117,6 +123,7 @@ PYBIND11_MODULE(ipctk, m)
     define_tangential_adhesion_potential(m);
 
     // utils
+    define_hessian_assembler(m);
     define_logger(m);
     define_profiler(m);
     define_thread_limiter(m);

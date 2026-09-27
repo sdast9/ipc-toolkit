@@ -450,6 +450,7 @@ void HashGrid::detect_candidates(
 void HashGrid::detect_vertex_vertex_candidates(
     std::vector<VertexVertexCandidate>& candidates) const
 {
+    candidates.clear();
     detect_candidates(
         vertex_items, vertex_boxes, can_vertices_collide, candidates);
 }
@@ -457,6 +458,7 @@ void HashGrid::detect_vertex_vertex_candidates(
 void HashGrid::detect_edge_vertex_candidates(
     std::vector<EdgeVertexCandidate>& candidates) const
 {
+    candidates.clear();
     detect_candidates(
         edge_items, vertex_items, edge_boxes, vertex_boxes,
         std::bind(&HashGrid::can_edge_vertex_collide, this, _1, _2),
@@ -466,6 +468,7 @@ void HashGrid::detect_edge_vertex_candidates(
 void HashGrid::detect_edge_edge_candidates(
     std::vector<EdgeEdgeCandidate>& candidates) const
 {
+    candidates.clear();
     detect_candidates(
         edge_items, edge_boxes,
         std::bind(&HashGrid::can_edges_collide, this, _1, _2), candidates);
@@ -474,6 +477,7 @@ void HashGrid::detect_edge_edge_candidates(
 void HashGrid::detect_face_vertex_candidates(
     std::vector<FaceVertexCandidate>& candidates) const
 {
+    candidates.clear();
     detect_candidates(
         face_items, vertex_items, face_boxes, vertex_boxes,
         std::bind(&HashGrid::can_face_vertex_collide, this, _1, _2),
@@ -483,6 +487,7 @@ void HashGrid::detect_face_vertex_candidates(
 void HashGrid::detect_edge_face_candidates(
     std::vector<EdgeFaceCandidate>& candidates) const
 {
+    candidates.clear();
     detect_candidates(
         edge_items, face_items, edge_boxes, face_boxes,
         std::bind(&HashGrid::can_edge_face_collide, this, _1, _2), candidates);
@@ -491,6 +496,7 @@ void HashGrid::detect_edge_face_candidates(
 void HashGrid::detect_face_face_candidates(
     std::vector<FaceFaceCandidate>& candidates) const
 {
+    candidates.clear();
     detect_candidates(
         face_items, face_boxes,
         std::bind(&HashGrid::can_faces_collide, this, _1, _2), candidates);

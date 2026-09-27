@@ -86,6 +86,7 @@ void BruteForce::detect_candidates(
 void BruteForce::detect_vertex_vertex_candidates(
     std::vector<VertexVertexCandidate>& candidates) const
 {
+    candidates.clear();
     detect_candidates<VertexVertexCandidate, true>(
         vertex_boxes, vertex_boxes, can_vertices_collide, candidates);
 }
@@ -93,6 +94,7 @@ void BruteForce::detect_vertex_vertex_candidates(
 void BruteForce::detect_edge_vertex_candidates(
     std::vector<EdgeVertexCandidate>& candidates) const
 {
+    candidates.clear();
     detect_candidates(
         edge_boxes, vertex_boxes,
         std::bind(&BruteForce::can_edge_vertex_collide, this, _1, _2),
@@ -102,6 +104,7 @@ void BruteForce::detect_edge_vertex_candidates(
 void BruteForce::detect_edge_edge_candidates(
     std::vector<EdgeEdgeCandidate>& candidates) const
 {
+    candidates.clear();
     detect_candidates<EdgeEdgeCandidate, true>(
         edge_boxes, edge_boxes,
         std::bind(&BruteForce::can_edges_collide, this, _1, _2), candidates);
@@ -110,6 +113,7 @@ void BruteForce::detect_edge_edge_candidates(
 void BruteForce::detect_face_vertex_candidates(
     std::vector<FaceVertexCandidate>& candidates) const
 {
+    candidates.clear();
     detect_candidates(
         face_boxes, vertex_boxes,
         std::bind(&BruteForce::can_face_vertex_collide, this, _1, _2),
@@ -119,6 +123,7 @@ void BruteForce::detect_face_vertex_candidates(
 void BruteForce::detect_edge_face_candidates(
     std::vector<EdgeFaceCandidate>& candidates) const
 {
+    candidates.clear();
     detect_candidates(
         edge_boxes, face_boxes,
         std::bind(&BruteForce::can_edge_face_collide, this, _1, _2),
@@ -128,6 +133,7 @@ void BruteForce::detect_edge_face_candidates(
 void BruteForce::detect_face_face_candidates(
     std::vector<FaceFaceCandidate>& candidates) const
 {
+    candidates.clear();
     detect_candidates<FaceFaceCandidate, true>(
         face_boxes, face_boxes,
         std::bind(&BruteForce::can_faces_collide, this, _1, _2), candidates);

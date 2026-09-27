@@ -131,6 +131,13 @@ public:
     /// @brief Compute the maximum rest length of all edges.
     double max_edge_length() const;
 
+    /// @brief Compute the unit normal of each face for the given vertex positions.
+    /// @note 3D only (requires triangular faces).
+    /// @param vertices The vertex positions of the collision mesh (|V| × 3).
+    /// @return The per-face unit normals (size |F|).
+    std::vector<Eigen::Vector3d>
+    face_normals(Eigen::ConstRef<Eigen::MatrixXd> vertices) const;
+
     /// @brief Get the mapping from vertices to edges of the collision mesh.
     const std::vector<std::vector<index_t>>& vertices_to_edges() const
     {
@@ -211,6 +218,19 @@ public:
     /// @return Matrix quantity on the full mesh with size equal to full_ndof() × full_ndof().
     Eigen::SparseMatrix<double>
     to_full_dof(const Eigen::SparseMatrix<double>& X) const;
+
+    /// @brief Whether the full ↔ collision DOF map is a pure selection matrix.
+    /// This is the case unless a (non-empty) displacement map was provided at
+    /// construction. When true, to_full_dof() is equivalent to scattering each
+    /// collision DOF to the full DOF of the same vertex and component, so
+    /// derivatives can be assembled directly in full-mesh DOFs instead of
+    /// applying to_full_dof() after the fact. The scalar index of that scatter
+    /// depends on IPC_TOOLKIT_VERTEX_DERIVATIVE_LAYOUT: collision DOF `i` maps
+    /// to full DOF `dim * to_full_vertex_id(i / dim) + i % dim` when the layout
+    /// is RowMajor (the default), and to `full_num_vertices() * d +
+    /// to_full_vertex_id(v)` for collision DOF `num_vertices() * d + v` when it
+    /// is ColMajor.
+    bool is_selection_dof_map() const { return m_is_selection_dof_map; }
 
     // -----------------------------------------------------------------------
 
@@ -413,6 +433,9 @@ protected:
     /// @brief Mapping from full displacements DOF to collision displacements DOF
     /// @note this is premultiplied by m_select_dof
     Eigen::SparseMatrix<double> m_displacement_dof_map;
+    /// @brief Whether the user-provided displacement map is the identity
+    /// (i.e., m_displacement_dof_map is a pure selection matrix).
+    bool m_is_selection_dof_map = true;
 
     /// @brief Vertices adjacent to vertices
     std::vector<std::vector<index_t>> m_vertex_vertex_adjacencies;

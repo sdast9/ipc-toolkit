@@ -126,7 +126,12 @@ TEST_CASE(
     CHECK(BruteForce().supports_budget());
     for (const auto method :
          { BroadPhaseMethod::LBVH, BroadPhaseMethod::SPATIAL_HASH,
-           BroadPhaseMethod::SWEEP_AND_PRUNE }) {
+           BroadPhaseMethod::SWEEP_AND_PRUNE
+#ifdef IPC_TOOLKIT_WITH_CUDA
+           ,
+           BroadPhaseMethod::LBVH_CUDA
+#endif
+         }) {
         auto bp = create_broad_phase(method);
         CHECK(!bp->supports_budget());
         bp->budget.max_cell_items = 10;

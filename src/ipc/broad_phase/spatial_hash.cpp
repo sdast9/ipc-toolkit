@@ -239,6 +239,7 @@ namespace {
 void SpatialHash::detect_vertex_vertex_candidates(
     std::vector<VertexVertexCandidate>& candidates) const
 {
+    candidates.clear();
     if (vertex_boxes.empty()) {
         return;
     }
@@ -254,6 +255,7 @@ void SpatialHash::detect_vertex_vertex_candidates(
 void SpatialHash::detect_edge_vertex_candidates(
     std::vector<EdgeVertexCandidate>& candidates) const
 {
+    candidates.clear();
     if (edge_boxes.empty() || vertex_boxes.empty()) {
         return;
     }
@@ -270,6 +272,7 @@ void SpatialHash::detect_edge_vertex_candidates(
 void SpatialHash::detect_edge_edge_candidates(
     std::vector<EdgeEdgeCandidate>& candidates) const
 {
+    candidates.clear();
     if (edge_boxes.empty()) {
         return;
     }
@@ -285,6 +288,7 @@ void SpatialHash::detect_edge_edge_candidates(
 void SpatialHash::detect_face_vertex_candidates(
     std::vector<FaceVertexCandidate>& candidates) const
 {
+    candidates.clear();
     if (face_boxes.empty() || vertex_boxes.empty()) {
         return;
     }
@@ -302,6 +306,7 @@ void SpatialHash::detect_face_vertex_candidates(
 void SpatialHash::detect_edge_face_candidates(
     std::vector<EdgeFaceCandidate>& candidates) const
 {
+    candidates.clear();
     if (edge_boxes.empty() || face_boxes.empty()) {
         return;
     }
@@ -318,6 +323,7 @@ void SpatialHash::detect_edge_face_candidates(
 void SpatialHash::detect_face_face_candidates(
     std::vector<FaceFaceCandidate>& candidates) const
 {
+    candidates.clear();
     if (face_boxes.empty()) {
         return;
     }

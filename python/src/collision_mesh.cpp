@@ -283,6 +283,43 @@ void define_collision_mesh(py::module_& m)
             "faces_to_edges", &CollisionMesh::faces_to_edges,
             "Get the mapping from faces to edges of the collision mesh (#F × 3).")
         .def(
+            "face_normals",
+            [](const CollisionMesh& self,
+               Eigen::ConstRef<Eigen::MatrixXd> vertices) -> Eigen::MatrixXd {
+                // face_normals() only asserts this, which is a no-op in a
+                // release build, so check it here to avoid UB from Python.
+                if (vertices.cols() != 3) {
+                    throw py::value_error(
+                        "face_normals() is only implemented for 3D meshes, but "
+                        "got vertices.shape = ["
+                        + std::to_string(vertices.rows()) + ", "
+                        + std::to_string(vertices.cols()) + "]");
+                }
+
+                const std::vector<Eigen::Vector3d> normals =
+                    self.face_normals(vertices);
+                // Return an (#F × 3) array rather than a list of vectors, to
+                // match the rest of the per-element accessors.
+                Eigen::MatrixXd N(normals.size(), 3);
+                for (size_t f = 0; f < normals.size(); ++f) {
+                    N.row(f) = normals[f];
+                }
+                return N;
+            },
+            R"ipc_Qu8mg5v7(
+            Compute the unit normal of each face for the given vertex positions.
+
+            Note:
+                3D only (requires triangular faces).
+
+            Parameters:
+                vertices: The vertex positions of the collision mesh (#V × 3).
+
+            Returns:
+                The per-face unit normals (#F × 3).
+            )ipc_Qu8mg5v7",
+            "vertices"_a)
+        .def(
             "vertices", &CollisionMesh::vertices,
             R"ipc_Qu8mg5v7(
             Compute the vertex positions from the positions of the full mesh.
@@ -373,6 +410,13 @@ void define_collision_mesh(py::module_& m)
                 Matrix quantity on the full mesh with size equal to full_ndof() × full_ndof().
             )ipc_Qu8mg5v7",
             "X"_a)
+        .def_property_readonly(
+            "is_selection_dof_map", &CollisionMesh::is_selection_dof_map,
+            R"ipc_Qu8mg5v7(
+            Whether the full ↔ collision DOF map is a pure selection matrix.
+
+            This is the case unless a (non-empty) displacement map was provided at construction. When true, to_full_dof() is equivalent to scattering each collision DOF to the full DOF of the same vertex and component, so derivatives can be assembled directly in full-mesh DOFs instead of applying to_full_dof() after the fact. The scalar index of that scatter depends on IPC_TOOLKIT_VERTEX_DERIVATIVE_LAYOUT: collision DOF i maps to full DOF dim * to_full_vertex_id(i // dim) + i % dim when the layout is RowMajor (the default), and to full_num_vertices * d + to_full_vertex_id(v) for collision DOF num_vertices * d + v when it is ColMajor.
+            )ipc_Qu8mg5v7")
         .def_property_readonly(
             "vertex_vertex_adjacencies",
             &CollisionMesh::vertex_vertex_adjacencies,
