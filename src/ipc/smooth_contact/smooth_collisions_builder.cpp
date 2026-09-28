@@ -7,6 +7,9 @@
 
 #include <tbb/enumerable_thread_specific.h>
 
+#include <algorithm>
+#include <cassert>
+
 namespace ipc {
 
 namespace {
@@ -35,6 +38,85 @@ namespace {
         if (pair->is_active()) {
             collisions.push_back(pair);
         }
+    }
+
+    // -------------------------------------------------------------------------
+    // Canonical collision order (see SmoothCollisionsBuilder::merge).
+
+    using CollisionKey = std::pair<index_t, index_t>;
+
+    /// Gather the deduplicated collisions of one kind from every thread's map
+    /// and append them in ascending key order (key = the pair of primitive ids
+    /// the map is keyed by). Neither the maps' iteration order nor the order of
+    /// the thread-local builders may influence the output: the maps use a hash
+    /// whose seed changes between processes (Abseil), so emitting in iteration
+    /// order made the summation order of the potential, gradient, and Hessian
+    /// differ between otherwise identical runs.
+    ///
+    /// Several threads (or several candidates in one thread) can create the
+    /// same key. Every such record is built from the same inputs (the key's
+    /// primitive ids, the parameters, the key's dhat and the vertex positions),
+    /// so the records are interchangeable and keeping any one of them is
+    /// deterministic; the assertion checks that invariant.
+    template <typename TCollision, typename Builder, typename Map>
+    size_t append_in_key_order(
+        const tbb::enumerable_thread_specific<Builder>& local_storage,
+        Map Builder::* map,
+        std::vector<std::shared_ptr<SmoothCollision>>& collisions)
+    {
+        std::vector<std::pair<CollisionKey, std::shared_ptr<TCollision>>>
+            entries;
+        for (const Builder& builder : local_storage) {
+            for (const auto& [key, collision] : builder.*map) {
+                entries.emplace_back(key, collision);
+            }
+        }
+
+        std::sort(
+            entries.begin(), entries.end(),
+            [](const auto& a, const auto& b) { return a.first < b.first; });
+
+        size_t count = 0;
+        for (size_t i = 0; i < entries.size(); i++) {
+            if (i > 0 && entries[i].first == entries[i - 1].first) {
+                assert(
+                    entries[i].second->dhat() == entries[i - 1].second->dhat()
+                    && entries[i].second->vertex_ids()
+                        == entries[i - 1].second->vertex_ids());
+                continue; // duplicate key: an interchangeable record
+            }
+            collisions.push_back(entries[i].second);
+            count++;
+        }
+        return count;
+    }
+
+    /// Append the (not deduplicated) collisions of the given type from every
+    /// thread's list, sorted by their primitive ids. Records with equal ids are
+    /// built from the same inputs, so their relative order does not matter.
+    template <typename Builder>
+    size_t append_type_in_key_order(
+        const tbb::enumerable_thread_specific<Builder>& local_storage,
+        const CollisionType type,
+        std::vector<std::shared_ptr<SmoothCollision>>& collisions)
+    {
+        std::vector<std::shared_ptr<SmoothCollision>> of_type;
+        for (const Builder& builder : local_storage) {
+            for (const auto& cc : builder.collisions) {
+                if (cc->type() == type) {
+                    of_type.push_back(cc);
+                }
+            }
+        }
+
+        std::sort(
+            of_type.begin(), of_type.end(),
+            [](const auto& a, const auto& b) {
+                return a->get_hash() < b->get_hash();
+            });
+
+        collisions.insert(collisions.end(), of_type.begin(), of_type.end());
+        return of_type.size();
     }
 } // namespace
 
@@ -192,15 +274,6 @@ void SmoothCollisionsBuilder<3>::merge(
         local_storage,
     SmoothCollisions& merged_collisions)
 {
-    unordered_map<
-        std::pair<index_t, index_t>,
-        std::shared_ptr<SmoothCollisionTemplate<Point3, Point3>>>
-        vert_vert_3_to_id;
-    unordered_map<
-        std::pair<index_t, index_t>,
-        std::shared_ptr<SmoothCollisionTemplate<Edge3, Point3>>>
-        edge_vert_3_to_id;
-
     // size up the hash items
     size_t total = 0;
     for (const auto& storage : local_storage) {
@@ -209,36 +282,24 @@ void SmoothCollisionsBuilder<3>::merge(
 
     merged_collisions.collisions.reserve(total);
 
-    // merge
-    for (const auto& builder : local_storage) {
-        vert_vert_3_to_id.insert(
-            builder.vert_vert_3_to_id.begin(), builder.vert_vert_3_to_id.end());
-        edge_vert_3_to_id.insert(
-            builder.edge_vert_3_to_id.begin(), builder.edge_vert_3_to_id.end());
-    }
-    int edge_vert_count = edge_vert_3_to_id.size();
-    int vert_vert_count = vert_vert_3_to_id.size();
-    int face_vert_count = 0;
-    int edge_edge_count = 0;
-
-    for (const auto& [key, val] : vert_vert_3_to_id) {
-        merged_collisions.collisions.push_back(val);
-    }
-    for (const auto& [key, val] : edge_vert_3_to_id) {
-        merged_collisions.collisions.push_back(val);
-    }
-
-    for (const auto& builder : local_storage) {
-        for (const auto& cc : builder.collisions) {
-            if (cc->type() == CollisionType::FACE_VERTEX) {
-                face_vert_count++;
-                merged_collisions.collisions.push_back(cc);
-            } else if (cc->type() == CollisionType::EDGE_EDGE) {
-                edge_edge_count++;
-                merged_collisions.collisions.push_back(cc);
-            }
-        }
-    }
+    // Emit a canonical sequence that depends only on the contact set, not on
+    // hash iteration or thread scheduling: vertex-vertex, edge-vertex,
+    // edge-edge, then face-vertex collisions, each sorted by primitive ids.
+    // The collision objects themselves (orientation, weight, dhat) are kept
+    // as built.
+    auto& collisions = merged_collisions.collisions;
+    const size_t vert_vert_count =
+        append_in_key_order<SmoothCollisionTemplate<Point3, Point3>>(
+            local_storage, &SmoothCollisionsBuilder<3>::vert_vert_3_to_id,
+            collisions);
+    const size_t edge_vert_count =
+        append_in_key_order<SmoothCollisionTemplate<Edge3, Point3>>(
+            local_storage, &SmoothCollisionsBuilder<3>::edge_vert_3_to_id,
+            collisions);
+    const size_t edge_edge_count = append_type_in_key_order(
+        local_storage, CollisionType::EDGE_EDGE, collisions);
+    const size_t face_vert_count = append_type_in_key_order(
+        local_storage, CollisionType::FACE_VERTEX, collisions);
 
     logger().trace(
         "edge-vert pairs {}, vert-vert pairs {}", edge_vert_count,
@@ -253,15 +314,6 @@ void SmoothCollisionsBuilder<2>::merge(
         local_storage,
     SmoothCollisions& merged_collisions)
 {
-    unordered_map<
-        std::pair<index_t, index_t>,
-        std::shared_ptr<SmoothCollisionTemplate<Point2, Point2>>>
-        vert_vert_2_to_id;
-    unordered_map<
-        std::pair<index_t, index_t>,
-        std::shared_ptr<SmoothCollisionTemplate<Edge2, Point2>>>
-        vert_edge_2_to_id;
-
     // size up the hash items
     size_t total = 0;
     for (const auto& storage : local_storage) {
@@ -270,22 +322,19 @@ void SmoothCollisionsBuilder<2>::merge(
 
     merged_collisions.collisions.reserve(total);
 
-    // merge
-    for (const auto& builder : local_storage) {
-        vert_vert_2_to_id.insert(
-            builder.vert_vert_2_to_id.begin(), builder.vert_vert_2_to_id.end());
-        vert_edge_2_to_id.insert(
-            builder.vert_edge_2_to_id.begin(), builder.vert_edge_2_to_id.end());
-    }
-    int edge_vert_count = vert_edge_2_to_id.size();
-    int vert_vert_count = vert_vert_2_to_id.size();
-
-    for (const auto& [key, val] : vert_vert_2_to_id) {
-        merged_collisions.collisions.push_back(val);
-    }
-    for (const auto& [key, val] : vert_edge_2_to_id) {
-        merged_collisions.collisions.push_back(val);
-    }
+    // Emit a canonical sequence that depends only on the contact set, not on
+    // hash iteration or thread scheduling: vertex-vertex, then edge-vertex
+    // collisions, each sorted by primitive ids. The collision objects
+    // themselves (orientation, weight, dhat) are kept as built.
+    auto& collisions = merged_collisions.collisions;
+    const size_t vert_vert_count =
+        append_in_key_order<SmoothCollisionTemplate<Point2, Point2>>(
+            local_storage, &SmoothCollisionsBuilder<2>::vert_vert_2_to_id,
+            collisions);
+    const size_t edge_vert_count =
+        append_in_key_order<SmoothCollisionTemplate<Edge2, Point2>>(
+            local_storage, &SmoothCollisionsBuilder<2>::vert_edge_2_to_id,
+            collisions);
 
     logger().trace(
         "edge-vert pairs {}, vert-vert pairs {}", edge_vert_count,
