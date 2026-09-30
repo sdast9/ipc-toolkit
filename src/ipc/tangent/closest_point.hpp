@@ -148,6 +148,14 @@ namespace detail {
         * (static_cast<double>(std::numeric_limits<scalar_of_t<T>>::epsilon())
            / std::numeric_limits<double>::epsilon());
 
+    /// Relative residual above which `solve_spd_2x2` refines its solution once.
+    /// Rounding-level residuals are ~1e-16; the bound sits far above them (so
+    /// well-conditioned systems keep their bits) and far below the debug bound.
+    template <typename T>
+    inline constexpr double CLOSEST_POINT_REFINE_TOL = 1e-12
+        * (static_cast<double>(std::numeric_limits<scalar_of_t<T>>::epsilon())
+           / std::numeric_limits<double>::epsilon());
+
     /// @brief Solves `Ax = b` for a 2x2 symmetric positive-definite matrix `A`.
     ///
     /// We implement this manually using Cramer's rule instead of
@@ -194,9 +202,28 @@ namespace detail {
         const T det = ipc::numext::fma(A(0, 0), A(1, 1), -bc) - bc_err;
         const auto is_nonsingular = det > T(0);
         const T inv_det = select(is_nonsingular, T(1) / det, T(0));
-        const Eigen::Vector2<T> x(
+        const Eigen::Vector2<T> x0(
             (A(1, 1) * b[0] - A(0, 1) * b[1]) * inv_det,
             (A(0, 0) * b[1] - A(1, 0) * b[0]) * inv_det);
+
+        // One step of iterative refinement, only where Cramer's rule is
+        // visibly inexact. Its residual grows with cond(A) (roughly
+        // cond(A) * eps * |A| |x|); for nearly parallel edges (cond(A) ~ 1e7
+        // is reached ~1e-3 rad from parallel) that is well above the 1e-10
+        // residual the pivoted LDLT solve it replaced satisfied, and above the
+        // debug bound below. Refining once with the same branchless kernel
+        // restores that accuracy. A lane whose residual is at rounding level
+        // keeps the Cramer bits, so well-conditioned systems are unchanged.
+        const Eigen::Vector2<T> r0 = b - A * x0;
+        const T res_scale = A.norm() * x0.norm() + b.norm();
+        const auto needs_refinement = is_nonsingular
+            && (r0.norm() > literal<T>(CLOSEST_POINT_REFINE_TOL<T>) * res_scale);
+        const Eigen::Vector2<T> dx(
+            (A(1, 1) * r0[0] - A(0, 1) * r0[1]) * inv_det,
+            (A(0, 0) * r0[1] - A(1, 0) * r0[0]) * inv_det);
+        const Eigen::Vector2<T> x(
+            select(needs_refinement, x0[0] + dx[0], x0[0]),
+            select(needs_refinement, x0[1] + dx[1], x0[1]));
 #ifndef NDEBUG
         const T scale = A.norm() * x.norm() + b.norm();
         const T tol = literal<T>(CLOSEST_POINT_RESIDUAL_TOL<T>);
