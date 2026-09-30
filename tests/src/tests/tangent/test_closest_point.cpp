@@ -280,8 +280,9 @@ TEST_CASE(
 {
     // The Gram system of the nearly parallel edge pair from a debug-build
     // failure of the semi-implicit stiffness (edges ~6e-4 rad from parallel,
-    // cond(A) ~ 4e7). Unrefined Cramer's rule leaves a residual of 4.3e-9
-    // (relative 2.1e-9), above the 1e-10 bound the debug assertion enforces.
+    // cond(A) ~ 4e7). Unrefined Cramer's rule leaves an absolute residual of
+    // 4.3e-9 without hardware FMA, a relative one of 2.1e-10 (1.4e-10 with
+    // FMA), above the 1e-10 bound the debug assertion enforces.
     Eigen::Matrix2d A;
     A << 0.067896765590525515, 1.1037422437870266, 1.1037422437870266,
         17.942643306292943;
