@@ -250,3 +250,107 @@ TEST_CASE(
             == point_edge_closest_point_hessian(a, b, c));
     }
 }
+
+namespace {
+// Cramer's rule with Kahan's determinant and no refinement: the kernel
+// `solve_spd_2x2` used before it learned to refine.
+Eigen::Vector2d cramer_2x2(const Eigen::Matrix2d& A, const Eigen::Vector2d& b)
+{
+    const double bc = A(0, 1) * A(1, 0);
+    const double bc_err = ipc::numext::fma(A(0, 1), A(1, 0), -bc);
+    const double det = ipc::numext::fma(A(0, 0), A(1, 1), -bc) - bc_err;
+    const double inv_det = det > 0 ? 1.0 / det : 0.0;
+    return Eigen::Vector2d(
+        (A(1, 1) * b[0] - A(0, 1) * b[1]) * inv_det,
+        (A(0, 0) * b[1] - A(1, 0) * b[0]) * inv_det);
+}
+
+double relative_residual(
+    const Eigen::Matrix2d& A,
+    const Eigen::Vector2d& b,
+    const Eigen::Vector2d& x)
+{
+    return (A * x - b).norm() / (A.norm() * x.norm() + b.norm());
+}
+} // namespace
+
+TEST_CASE(
+    "Nearly parallel 2x2 solve stays accurate",
+    "[friction][edge-edge][closest_point][solve_spd_2x2]")
+{
+    // The Gram system of the nearly parallel edge pair from a debug-build
+    // failure of the semi-implicit stiffness (edges ~6e-4 rad from parallel,
+    // cond(A) ~ 4e7). Unrefined Cramer's rule leaves a residual of 4.3e-9
+    // (relative 2.1e-9), above the 1e-10 bound the debug assertion enforces.
+    Eigen::Matrix2d A;
+    A << 0.067896765590525515, 1.1037422437870266, 1.1037422437870266,
+        17.942643306292943;
+    const Eigen::Vector2d b(0.62082203665333358, 10.092200801559782);
+
+    const Eigen::Vector2d x_cramer = cramer_2x2(A, b);
+    const Eigen::Vector2d x = ipc::detail::solve_spd_2x2<double>(A, b);
+
+    // Reference: the pivoted LDLT solve this code used originally, and the
+    // exact solution in extended precision.
+    const Eigen::Vector2d x_ldlt = A.ldlt().solve(b);
+    const Eigen::Vector2d x_exact =
+        (Eigen::Matrix2<long double>(A.cast<long double>()).inverse()
+         * b.cast<long double>())
+            .cast<double>();
+
+    CAPTURE(x_cramer.transpose(), x.transpose(), x_ldlt.transpose());
+
+    // The failure this guards against is really there without refinement ...
+    CHECK(
+        relative_residual(A, b, x_cramer)
+        > ipc::detail::CLOSEST_POINT_RESIDUAL_TOL<double>);
+    // ... and refinement brings the residual below the debug bound, to the
+    // rounding level of the LDLT solve. (The forward error stays at
+    // cond(A) * eps, as for any backward-stable solve, so it is only bounded.)
+    CHECK(
+        relative_residual(A, b, x)
+        < ipc::detail::CLOSEST_POINT_RESIDUAL_TOL<double>);
+    CHECK(relative_residual(A, b, x) < 1e-15);
+    CHECK((x - x_exact).norm() < 1e-7);
+}
+
+TEST_CASE(
+    "2x2 solve keeps the Cramer bits where Cramer is accurate",
+    "[friction][edge-edge][closest_point][solve_spd_2x2]")
+{
+    // Well-conditioned Gram systems: the residual is at rounding level, so the
+    // refinement must not fire and the result must equal Cramer's rule bit for
+    // bit (the semi-implicit smoke scenes rely on this).
+    const std::vector<std::pair<Eigen::Matrix2d, Eigen::Vector2d>> systems = {
+        { (Eigen::Matrix2d() << 2.0, 0.5, 0.5, 1.0).finished(),
+          Eigen::Vector2d(1.0, -3.0) },
+        { (Eigen::Matrix2d() << 1.0, 0.0, 0.0, 1.0).finished(),
+          Eigen::Vector2d(0.3, 0.7) },
+        { (Eigen::Matrix2d() << 4.25, -1.75, -1.75, 0.8125).finished(),
+          Eigen::Vector2d(2.5, 0.125) },
+        { (Eigen::Matrix2d() << 1.3, 0.2, 0.2, 5.1).finished(),
+          Eigen::Vector2d(-0.4, 0.9) },
+    };
+
+    for (const auto& [A, b] : systems) {
+        CAPTURE(A, b);
+        const Eigen::Vector2d x = ipc::detail::solve_spd_2x2<double>(A, b);
+        const Eigen::Vector2d x_cramer = cramer_2x2(A, b);
+        CHECK(x[0] == x_cramer[0]);
+        CHECK(x[1] == x_cramer[1]);
+        CHECK(relative_residual(A, b, x) < 1e-15);
+    }
+
+    // Randomized, mildly conditioned Gram matrices A = B Bᵀ.
+    srand(1234);
+    for (int i = 0; i < 1000; i++) {
+        const Eigen::Matrix2d B = Eigen::Matrix2d::Random();
+        const Eigen::Matrix2d A =
+            B * B.transpose() + 0.5 * Eigen::Matrix2d::Identity();
+        const Eigen::Vector2d b = Eigen::Vector2d::Random();
+        const Eigen::Vector2d x = ipc::detail::solve_spd_2x2<double>(A, b);
+        const Eigen::Vector2d x_cramer = cramer_2x2(A, b);
+        CHECK(x[0] == x_cramer[0]);
+        CHECK(x[1] == x_cramer[1]);
+    }
+}
