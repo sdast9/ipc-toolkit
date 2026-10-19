@@ -52,7 +52,8 @@ void NormalCollisions::build(
 
     tbb::enumerable_thread_specific<NormalCollisionsBuilder> storage(
         use_area_weighting(), enable_shape_derivatives(),
-        collision_set_type() == CollisionSetType::OGC);
+        collision_set_type() == CollisionSetType::OGC,
+        separate_signed_contributions());
 
     tbb::parallel_for(
         size_t(0), candidates.vv_candidates.size(), [&](size_t i) {
@@ -169,6 +170,16 @@ void NormalCollisions::set_use_area_weighting(const bool use_area_weighting)
     }
 
     m_use_area_weighting = use_area_weighting;
+}
+
+void NormalCollisions::set_separate_signed_contributions(const bool separate)
+{
+    if (!empty() && separate != m_separate_signed_contributions) {
+        logger().warn(
+            "Setting separate_signed_contributions after building collisions. "
+            "Re-build collisions for this to have an effect.");
+    }
+    m_separate_signed_contributions = separate;
 }
 
 void NormalCollisions::set_collision_set_type(const CollisionSetType type)

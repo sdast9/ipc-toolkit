@@ -179,6 +179,26 @@ public:
     /// @brief Get if the collision set are using the convergent formulation.
     /// @note If not empty, this is the current value not necessarily the value used to build the collisions.
     /// @return If the collision set are using the convergent formulation.
+    /// @brief Keep positive and negative contributions to the same stencil in
+    ///        separate collisions instead of merging them into one net weight.
+    ///
+    /// The improved max approximator removes duplicate counting with negative
+    /// contributions (for example a -1 vertex-vertex correction against two
+    /// +1 edge-vertex parents). Merged, a collision carries only the net
+    /// weight, and one that cancels to zero is dropped. A caller that gives
+    /// each parent contribution its own coefficient (stiffness_scale as the
+    /// contribution-weighted mean of its parents) needs every contribution's
+    /// sign kept: separated, each collision's parents share one sign, so
+    /// weight * stiffness_scale is the signed sum of the parents' terms.
+    /// With unit coefficients the potential is unchanged (the separated
+    /// collisions sum to the merged one). Off by default.
+    bool separate_signed_contributions() const
+    {
+        return m_separate_signed_contributions;
+    }
+
+    void set_separate_signed_contributions(const bool separate);
+
     bool enable_shape_derivatives() const { return m_enable_shape_derivatives; }
 
     /// @brief Set if the collision set should enable shape derivative computation.
@@ -206,6 +226,7 @@ protected:
     CollisionSetType m_collision_set_type = CollisionSetType::IPC;
     bool m_use_area_weighting = false;
     bool m_enable_shape_derivatives = false;
+    bool m_separate_signed_contributions = false;
 };
 
 } // namespace ipc

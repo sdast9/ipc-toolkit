@@ -19,7 +19,8 @@ public:
     NormalCollisionsBuilder(
         const bool use_area_weighting,
         const bool enable_shape_derivatives,
-        const bool use_ogc);
+        const bool use_ogc,
+        const bool separate_signed_contributions = false);
 
     void add_vertex_vertex_collision(
         const CollisionMesh& mesh,
@@ -82,6 +83,23 @@ protected:
         unordered_map<VertexVertexNormalCollision, size_t>& vv_to_id,
         std::vector<VertexVertexNormalCollision>& vv_collisions);
 
+    /// Route a contribution to the map of its sign when signed contributions
+    /// are kept separate (one collision per stencil and sign), else merge.
+    static void add_vertex_vertex_collision(
+        const VertexVertexNormalCollision& vv_collision,
+        unordered_map<VertexVertexNormalCollision, size_t>& vv_to_id,
+        unordered_map<VertexVertexNormalCollision, size_t>& vv_negative_to_id,
+        const bool separate_signed_contributions,
+        std::vector<VertexVertexNormalCollision>& vv_collisions)
+    {
+        add_vertex_vertex_collision(
+            vv_collision,
+            separate_signed_contributions && vv_collision.weight < 0
+                ? vv_negative_to_id
+                : vv_to_id,
+            vv_collisions);
+    }
+
     void add_vertex_vertex_collision(
         const index_t vertex0_id,
         const index_t vertex1_id,
@@ -92,7 +110,9 @@ protected:
         VertexVertexNormalCollision vv(
             vertex0_id, vertex1_id, weight, weight_gradient);
         vv.parents = { parent };
-        add_vertex_vertex_collision(vv, vv_to_id, vv_collisions);
+        add_vertex_vertex_collision(
+            vv, vv_to_id, vv_negative_to_id, separate_signed_contributions,
+            vv_collisions);
     }
 
     // -------------------------------------------------------------------------
@@ -101,6 +121,23 @@ protected:
         const EdgeVertexNormalCollision& ev_collision,
         unordered_map<EdgeVertexNormalCollision, size_t>& ev_to_id,
         std::vector<EdgeVertexNormalCollision>& ev_collisions);
+
+    /// Route a contribution to the map of its sign when signed contributions
+    /// are kept separate (one collision per stencil and sign), else merge.
+    static void add_edge_vertex_collision(
+        const EdgeVertexNormalCollision& ev_collision,
+        unordered_map<EdgeVertexNormalCollision, size_t>& ev_to_id,
+        unordered_map<EdgeVertexNormalCollision, size_t>& ev_negative_to_id,
+        const bool separate_signed_contributions,
+        std::vector<EdgeVertexNormalCollision>& ev_collisions)
+    {
+        add_edge_vertex_collision(
+            ev_collision,
+            separate_signed_contributions && ev_collision.weight < 0
+                ? ev_negative_to_id
+                : ev_to_id,
+            ev_collisions);
+    }
 
     void add_edge_vertex_collision(
         const index_t edge_id,
@@ -112,7 +149,9 @@ protected:
         EdgeVertexNormalCollision ev(
             edge_id, vertex_id, weight, weight_gradient);
         ev.parents = { parent };
-        add_edge_vertex_collision(ev, ev_to_id, ev_collisions);
+        add_edge_vertex_collision(
+            ev, ev_to_id, ev_negative_to_id, separate_signed_contributions,
+            ev_collisions);
     }
 
     void add_edge_vertex_collision(
@@ -130,6 +169,23 @@ protected:
         unordered_map<EdgeEdgeNormalCollision, size_t>& ee_to_id,
         std::vector<EdgeEdgeNormalCollision>& ee_collisions);
 
+    /// Route a contribution to the map of its sign when signed contributions
+    /// are kept separate (one collision per stencil and sign), else merge.
+    static void add_edge_edge_collision(
+        const EdgeEdgeNormalCollision& ee_collision,
+        unordered_map<EdgeEdgeNormalCollision, size_t>& ee_to_id,
+        unordered_map<EdgeEdgeNormalCollision, size_t>& ee_negative_to_id,
+        const bool separate_signed_contributions,
+        std::vector<EdgeEdgeNormalCollision>& ee_collisions)
+    {
+        add_edge_edge_collision(
+            ee_collision,
+            separate_signed_contributions && ee_collision.weight < 0
+                ? ee_negative_to_id
+                : ee_to_id,
+            ee_collisions);
+    }
+
     void add_edge_edge_collision(
         const index_t edge0_id,
         const index_t edge1_id,
@@ -142,7 +198,9 @@ protected:
         EdgeEdgeNormalCollision ee(
             edge0_id, edge1_id, eps_x, weight, weight_gradient, dtype);
         ee.parents = { parent };
-        add_edge_edge_collision(ee, ee_to_id, ee_collisions);
+        add_edge_edge_collision(
+            ee, ee_to_id, ee_negative_to_id, separate_signed_contributions,
+            ee_collisions);
     }
 
     // -------------------------------------------------------------------------
@@ -151,6 +209,10 @@ protected:
     unordered_map<VertexVertexNormalCollision, size_t> vv_to_id;
     unordered_map<EdgeVertexNormalCollision, size_t> ev_to_id;
     unordered_map<EdgeEdgeNormalCollision, size_t> ee_to_id;
+    // Negative contributions when signed contributions are kept separate.
+    unordered_map<VertexVertexNormalCollision, size_t> vv_negative_to_id;
+    unordered_map<EdgeVertexNormalCollision, size_t> ev_negative_to_id;
+    unordered_map<EdgeEdgeNormalCollision, size_t> ee_negative_to_id;
 
     // Constructed collisions
     std::vector<VertexVertexNormalCollision> vv_collisions;
@@ -162,6 +224,7 @@ protected:
     const bool use_area_weighting;
     const bool enable_shape_derivatives;
     const bool use_ogc;
+    const bool separate_signed_contributions;
 };
 
 } // namespace ipc

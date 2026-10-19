@@ -26,10 +26,12 @@ namespace {
 NormalCollisionsBuilder::NormalCollisionsBuilder(
     const bool _use_area_weighting,
     const bool _enable_shape_derivatives,
-    const bool _use_ogc)
+    const bool _use_ogc,
+    const bool _separate_signed_contributions)
     : use_area_weighting(_use_area_weighting)
     , enable_shape_derivatives(_enable_shape_derivatives)
     , use_ogc(_use_ogc)
+    , separate_signed_contributions(_separate_signed_contributions)
 {
 }
 
@@ -658,6 +660,11 @@ void NormalCollisionsBuilder::merge(
     unordered_map<VertexVertexNormalCollision, size_t> vv_to_id;
     unordered_map<EdgeVertexNormalCollision, size_t> ev_to_id;
     unordered_map<EdgeEdgeNormalCollision, size_t> ee_to_id;
+    unordered_map<VertexVertexNormalCollision, size_t> vv_negative_to_id;
+    unordered_map<EdgeVertexNormalCollision, size_t> ev_negative_to_id;
+    unordered_map<EdgeEdgeNormalCollision, size_t> ee_negative_to_id;
+    const bool separate_signed =
+        merged_collisions.separate_signed_contributions();
     auto& vv_collisions = merged_collisions.vv_collisions;
     auto& ev_collisions = merged_collisions.ev_collisions;
     auto& ee_collisions = merged_collisions.ee_collisions;
@@ -681,28 +688,37 @@ void NormalCollisionsBuilder::merge(
     for (const auto& builder : local_storage) {
         if (vv_collisions.empty()) {
             vv_to_id = builder.vv_to_id;
+            vv_negative_to_id = builder.vv_negative_to_id;
             vv_collisions = builder.vv_collisions;
         } else {
             for (const auto& vv : builder.vv_collisions) {
-                add_vertex_vertex_collision(vv, vv_to_id, vv_collisions);
+                add_vertex_vertex_collision(
+                    vv, vv_to_id, vv_negative_to_id, separate_signed,
+                    vv_collisions);
             }
         }
 
         if (ev_collisions.empty()) {
             ev_to_id = builder.ev_to_id;
+            ev_negative_to_id = builder.ev_negative_to_id;
             ev_collisions = builder.ev_collisions;
         } else {
             for (const auto& ev : builder.ev_collisions) {
-                add_edge_vertex_collision(ev, ev_to_id, ev_collisions);
+                add_edge_vertex_collision(
+                    ev, ev_to_id, ev_negative_to_id, separate_signed,
+                    ev_collisions);
             }
         }
 
         if (ee_collisions.empty()) {
             ee_to_id = builder.ee_to_id;
+            ee_negative_to_id = builder.ee_negative_to_id;
             ee_collisions = builder.ee_collisions;
         } else {
             for (const auto& ee : builder.ee_collisions) {
-                add_edge_edge_collision(ee, ee_to_id, ee_collisions);
+                add_edge_edge_collision(
+                    ee, ee_to_id, ee_negative_to_id, separate_signed,
+                    ee_collisions);
             }
         }
 
