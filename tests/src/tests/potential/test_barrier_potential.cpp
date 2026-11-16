@@ -771,9 +771,10 @@ TEST_CASE(
             == Catch::Approx(2 * V0).epsilon(1e-12));
         CHECK(barrier_potential.gradient(collisions, mesh, vertices)
                   .isApprox(2 * G0, 1e-12));
-        CHECK(Eigen::MatrixXd(
-                  barrier_potential.hessian(collisions, mesh, vertices))
-                  .isApprox(2 * H0, 1e-12));
+        CHECK(
+            Eigen::MatrixXd(
+                barrier_potential.hessian(collisions, mesh, vertices))
+                .isApprox(2 * H0, 1e-12));
     }
 
     SECTION("random per-collision scales match finite differences")

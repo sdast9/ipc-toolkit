@@ -398,7 +398,7 @@ TEST_CASE(
 {
     CountProbe probe;
     // Single set: keys 7 (4 items) and 9 (3 items): 6 + 3 = 9 pairs.
-    probe.set_items({ { 7, 4 }, { 9, 3 } }, { });
+    probe.set_items({ { 7, 4 }, { 9, 3 } }, {});
     probe.budget.max_candidate_emissions = 9;
     std::vector<VertexVertexCandidate> vv;
     CHECK_NOTHROW(probe.detect_vertex_vertex_candidates(vv));
