@@ -292,3 +292,30 @@ TEST_CASE(
         == size_t(E.rows()) * (E.rows() - 1) / 2
             + size_t(F.rows()) * V0.rows());
 }
+
+TEST_CASE(
+    "All-type candidates retain resource budgets and statistics",
+    "[broad_phase][budget][esp_merge]")
+{
+    Eigen::MatrixXd V0, V1;
+    Eigen::MatrixXi E, F;
+    two_sheets(4, .05, 1, .5, V0, V1, E, F);
+    const CollisionMesh mesh(V0, E, F);
+    for (auto method :
+         { BroadPhaseMethod::HASH_GRID, BroadPhaseMethod::BRUTE_FORCE }) {
+        auto bp = create_broad_phase(method);
+        // BruteForce statistics are intentionally opt-in with its budget.
+        bp->budget.max_candidate_emissions = 1000000;
+        Candidates candidates;
+        candidates.build(mesh, V0, 0.1, bp.get(), true);
+        REQUIRE(candidates.has_all_types);
+        REQUIRE(!candidates.empty());
+        CHECK(bp->build_statistics().measured);
+        bp->budget.max_candidate_emissions = 1;
+        CHECK_THROWS_AS(
+            candidates.build(mesh, V0, 0.1, bp.get(), true),
+            BroadPhaseBudgetExceeded);
+        CHECK(candidates.empty());
+        CHECK_FALSE(candidates.has_all_types);
+    }
+}

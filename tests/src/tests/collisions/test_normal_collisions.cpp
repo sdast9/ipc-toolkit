@@ -10,6 +10,7 @@
 #include <igl/edges.h>
 
 #include <cmath>
+#include <stdexcept>
 
 using namespace ipc;
 
@@ -309,6 +310,65 @@ TEST_CASE("Plane-Vertex NormalCollision", "[collision][plane-vertex]")
         == 2 * n * n.transpose());
 }
 
+TEST_CASE(
+    "Normal collisions reject 3D candidates with all types", "[collisions]")
+{
+    constexpr double dhat = 0.1;
+
+    // Two triangles tip to tip, 0.05 apart.
+    Eigen::MatrixXd V(6, 3);
+    V << 0, 0, 0.025, 1, 0, 1, -1, 0, 1, //
+        0, 0, -0.025, 0, 1, -1, 0, -1, -1;
+    Eigen::MatrixXi F(2, 3);
+    F << 0, 1, 2, 3, 4, 5;
+    Eigen::MatrixXi E;
+    igl::edges(F, E);
+    const CollisionMesh mesh(V, E, F);
+
+    NormalCollisions expected;
+    expected.build(mesh, V, dhat);
+    REQUIRE(!expected.empty());
+
+    NormalCollisions collisions;
+    Candidates candidates;
+
+    candidates.build(mesh, V, dhat / 2);
+    collisions.build(candidates, mesh, V, dhat);
+    CHECK(collisions.size() == expected.size());
+
+    candidates.build(mesh, V, dhat / 2, nullptr, /*all_types=*/true);
+    CHECK_THROWS_AS(
+        collisions.build(candidates, mesh, V, dhat), std::invalid_argument);
+}
+
+TEST_CASE(
+    "Normal collisions accept 2D candidates with all types", "[collisions]")
+{
+    constexpr double dhat = 0.1;
+
+    // Vertex 2 is 0.05 above the middle of edge 0.
+    Eigen::MatrixXd V(4, 2);
+    V << 0, 0, 1, 0, 0.5, 0.05, 0.5, 1;
+    Eigen::MatrixXi E(2, 2);
+    E << 0, 1, 2, 3;
+    const CollisionMesh mesh(V, E);
+
+    NormalCollisions expected;
+    expected.build(mesh, V, dhat);
+    REQUIRE(!expected.empty());
+
+    // In 2D, all_types adds no candidate types, so the result is unchanged.
+    Candidates candidates;
+    candidates.build(mesh, V, dhat / 2, nullptr, /*all_types=*/true);
+    NormalCollisions collisions;
+    collisions.build(candidates, mesh, V, dhat);
+
+    const BarrierPotential barrier(dhat, 1.0);
+    CHECK(
+        barrier(collisions, mesh, V)
+        == Catch::Approx(barrier(expected, mesh, V)).epsilon(1e-12));
+}
+
 TEST_CASE("NormalCollisions::is_*", "[collisions]")
 {
     NormalCollisions collisions;
@@ -379,8 +439,7 @@ fv: 17=(37, 18, 63) 187, w: 0.0137957, d: 0.00500269
 fv: 471=(140, 220, 241) 55, w: 0.0160469, d: 0.006392)ipc_Qu8mg5v7");
 }
 TEST_CASE(
-    "NormalCollisions::compute_avg_distance",
-    "[collisions][avg_distance]")
+    "NormalCollisions::compute_avg_distance", "[collisions][avg_distance]")
 {
     const double dhat = sqrt(2.0);
 
@@ -394,7 +453,8 @@ TEST_CASE(
 
     SECTION("empty set returns infinity")
     {
-        CHECK(std::isinf(collisions.compute_avg_distance(mesh, vertices, dhat)));
+        CHECK(
+            std::isinf(collisions.compute_avg_distance(mesh, vertices, dhat)));
     }
 
     SECTION("matches serial brute force")
@@ -415,7 +475,8 @@ TEST_CASE(
         }
         REQUIRE(count > 0);
 
-        const double avg = collisions.compute_avg_distance(mesh, vertices, dhat);
+        const double avg =
+            collisions.compute_avg_distance(mesh, vertices, dhat);
         CHECK(avg == Catch::Approx(sum / count));
 
         // Consistency: min squared distance ≤ avg squared distance.
@@ -425,7 +486,8 @@ TEST_CASE(
 
         // Shrinking dhat below the minimum distance deactivates everything.
         const double tiny_dhat = 0.5 * sqrt(min_dist_sq);
-        CHECK(std::isinf(
-            collisions.compute_avg_distance(mesh, vertices, tiny_dhat)));
+        CHECK(
+            std::isinf(
+                collisions.compute_avg_distance(mesh, vertices, tiny_dhat)));
     }
 }

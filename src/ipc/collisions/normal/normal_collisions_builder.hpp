@@ -20,7 +20,8 @@ public:
         const bool use_area_weighting,
         const bool enable_shape_derivatives,
         const bool use_ogc,
-        const bool separate_signed_contributions = false);
+        const bool separate_signed_contributions = false,
+        const bool skip_obstacles = false);
 
     void add_vertex_vertex_collision(
         const CollisionMesh& mesh,
@@ -225,6 +226,7 @@ protected:
     const bool enable_shape_derivatives;
     const bool use_ogc;
     const bool separate_signed_contributions;
+    const bool skip_obstacles; // turns off obstacle integration
 };
 
 } // namespace ipc

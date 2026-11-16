@@ -5,7 +5,7 @@
 #include <catch2/generators/catch_generators.hpp>
 
 #include <ipc/ipc.hpp>
-#include <ipc/smooth_contact/smooth_contact_potential.hpp>
+#include <ipc/gcp/gcp_potential.hpp>
 
 #include <igl/readCSV.h>
 #include <tbb/global_control.h>
@@ -21,9 +21,15 @@ namespace {
 
 // Everything that distinguishes one collision record from another.
 using Record = std::tuple<
-    CollisionType, index_t, index_t, double, double, bool, std::vector<index_t>>;
+    CollisionType,
+    index_t,
+    index_t,
+    double,
+    double,
+    bool,
+    std::vector<index_t>>;
 
-std::vector<Record> records(const SmoothCollisions& collisions)
+std::vector<Record> records(const GCPCollisions& collisions)
 {
     std::vector<Record> r;
     for (const auto& cc : collisions.collisions) {
@@ -43,29 +49,28 @@ struct Evaluation {
 // Serial evaluation: with one thread the summation follows the collision
 // order, so equal orders must give bitwise-equal results.
 Evaluation evaluate(
-    const SmoothContactPotential& potential,
-    const SmoothCollisions& collisions,
+    const GCPPotential& potential,
+    const GCPCollisions& collisions,
     const CollisionMesh& mesh,
     const Eigen::MatrixXd& vertices)
 {
-    tbb::global_control serial(
-        tbb::global_control::max_allowed_parallelism, 1);
+    tbb::global_control serial(tbb::global_control::max_allowed_parallelism, 1);
     return { potential(collisions, mesh, vertices),
              potential.gradient(collisions, mesh, vertices),
              Eigen::MatrixXd(potential.hessian(collisions, mesh, vertices)) };
 }
 
-SmoothCollisions build(
+GCPCollisions build(
     const Candidates& candidates,
     const CollisionMesh& mesh,
     const Eigen::MatrixXd& vertices,
-    const SmoothContactParameters& params,
-    const SmoothCollisions& adaptive,
+    const GCPParameters& params,
+    const GCPCollisions& adaptive,
     const int threads)
 {
     tbb::global_control control(
         tbb::global_control::max_allowed_parallelism, threads);
-    SmoothCollisions collisions = adaptive; // carries the adaptive dhat
+    GCPCollisions collisions = adaptive; // carries the adaptive dhat
     collisions.build(candidates, mesh, vertices, params, true);
     return collisions;
 }
@@ -88,7 +93,8 @@ TEST_CASE(
         REQUIRE(igl::readCSV(mesh_name + "-e.csv", edges));
         dhat = 3e-2;
     } else {
-        REQUIRE(tests::load_mesh("two-cubes-close.ply", vertices, edges, faces));
+        REQUIRE(
+            tests::load_mesh("two-cubes-close.ply", vertices, edges, faces));
         dhat = 1e-1;
     }
     CAPTURE(is_2d);
@@ -105,16 +111,16 @@ TEST_CASE(
         vertices = mesh.vertices(vertices);
     }
 
-    SmoothContactParameters params(dhat, 0.9, -0.05, 0.95, 0.05, 1);
+    GCPParameters params(dhat, 0.9, -0.05, 0.95, 0.05, 1);
     params.set_adaptive_dhat_ratio(1.5);
-    SmoothCollisions adaptive;
+    GCPCollisions adaptive;
     adaptive.compute_adaptive_dhat(
         mesh, vertices, params, make_default_broad_phase().get());
 
     Candidates candidates;
     candidates.build(mesh, vertices, dhat / 2);
 
-    const SmoothCollisions reference =
+    const GCPCollisions reference =
         build(candidates, mesh, vertices, params, adaptive, 1);
     REQUIRE(reference.size() > 10);
 
@@ -127,7 +133,7 @@ TEST_CASE(
                                        CollisionType::EDGE_VERTEX,
                                        CollisionType::EDGE_EDGE,
                                        CollisionType::FACE_VERTEX };
-    const auto rank = [&](const SmoothCollision& cc) {
+    const auto rank = [&](const GCPCollision& cc) {
         const auto it =
             std::find(type_order.begin(), type_order.end(), cc.type());
         REQUIRE(it != type_order.end());
@@ -138,17 +144,15 @@ TEST_CASE(
         CHECK(rank(reference[i - 1]) <= rank(reference[i]));
     }
 
-    const SmoothContactPotential potential(params);
-    const Evaluation expected =
-        evaluate(potential, reference, mesh, vertices);
+    const GCPPotential potential(params);
+    const Evaluation expected = evaluate(potential, reference, mesh, vertices);
     REQUIRE(expected.gradient.squaredNorm() > 0);
 
     // Permuting the insertion order (candidate order) or the thread count
     // changes neither the sequence nor, bitwise, the energy, gradient, or
     // Hessian evaluated from it.
     std::mt19937 rng(20260928);
-    const int max_threads = std::max<int>(
-        2, tbb::info::default_concurrency());
+    const int max_threads = std::max<int>(2, tbb::info::default_concurrency());
     for (int trial = 0; trial < 4; trial++) {
         CAPTURE(trial);
         Candidates permuted = candidates;
@@ -159,7 +163,7 @@ TEST_CASE(
         std::shuffle(
             permuted.fv_candidates.begin(), permuted.fv_candidates.end(), rng);
 
-        const SmoothCollisions collisions = build(
+        const GCPCollisions collisions = build(
             permuted, mesh, vertices, params, adaptive,
             trial % 2 ? max_threads : 1);
         CHECK(records(collisions) == records(reference));

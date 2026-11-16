@@ -76,6 +76,18 @@ cd build/test && ctest --verbose -R "test_name_pattern"
 ./build/test/ipc_toolkit_tests "[tag]"
 ```
 
+### Python Tests
+
+Python binding tests live in `python/tests/` and use **nose2** (listed in `python/tests/requirements.txt`). They are plain `test_*` functions with bare `assert`s, not pytest fixtures or `unittest` classes. `find_ipctk` locates a built `ipctk` module, so build the bindings first (`cmake --build --preset=python`).
+
+```bash
+# Run all Python tests
+cd python/tests && python -m nose2 -v
+
+# Run one test file
+cd python/tests && python -m nose2 -v test_collision_mesh
+```
+
 ### Benchmarks
 
 Benchmarks are hidden Catch2 cases tagged `[!benchmark]`, so they don't run by
@@ -195,6 +207,10 @@ A before/after figure measures one quantity across many cases, so it is **horizo
   - **Format** — `1.43x`, two decimals, bucketed on the rounded value so the color always agrees with the printed number — a 0.997x must not render as a red `1.00x`, and a 1.0499x must not render green.
 - **Category labels** — two lines, right-aligned against the axis: case name on the first line, its size and any variant/config on the second, separated by a middle dot (e.g. `"cloth-ball"` over `"3,012 · two-pass"`); the second line is smaller and greyed.
 - **Legend** — inside the plot, top right, vertical, no frame (`legend=dict(x=0.99, y=0.99, xanchor='right', yanchor='top', bgcolor='rgba(0,0,0,0)')`), no legend title; entries name themselves (`"before (main)"`, `"after"`).
+
+## Branch Naming
+
+Branch names must match `^(feature|bugfix|fix|refactor|docs|chore|test|release)\/.+` (e.g. `feature/cuda`, `fix/eigen-github-fallback`). The only exceptions are `main`, release branches matching `v[0-9.]*` (e.g. `v1.2.1`), maintenance branches matching `[0-9]+\.[0-9]+\.x` (e.g. `1.6.x`, which collects the cherry-picks for patch releases like v1.6.1), and `gh-pages`.
 
 ## Writing PR Descriptions
 
