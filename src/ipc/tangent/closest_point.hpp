@@ -217,7 +217,8 @@ namespace detail {
         const Eigen::Vector2<T> r0 = b - A * x0;
         const T res_scale = A.norm() * x0.norm() + b.norm();
         const auto needs_refinement = is_nonsingular
-            && (r0.norm() > literal<T>(CLOSEST_POINT_REFINE_TOL<T>) * res_scale);
+            && (r0.norm()
+                > literal<T>(CLOSEST_POINT_REFINE_TOL<T>) * res_scale);
         const Eigen::Vector2<T> dx(
             (A(1, 1) * r0[0] - A(0, 1) * r0[1]) * inv_det,
             (A(0, 0) * r0[1] - A(1, 0) * r0[0]) * inv_det);

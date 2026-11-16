@@ -216,8 +216,8 @@ MatrixMax12d NormalPotential::hessian(
     if (!collision.is_mollified()) {
         // ∇²[f(d(x))] = ∇(f'(d(x)) * ∇d(x))
         //             = f"(d(x)) * ∇d(x) * ∇d(x)ᵀ + f'(d(x)) * ∇²d(x)
-        hess = (w * hess_f) * grad_d * grad_d.transpose()
-            + (w * grad_f) * hess_d;
+        hess =
+            (w * hess_f) * grad_d * grad_d.transpose() + (w * grad_f) * hess_d;
     } else {
         const double f = (*this)(d, collision.dmin); // f(d(x))
 
@@ -235,8 +235,7 @@ MatrixMax12d NormalPotential::hessian(
         // ∇²[m(x) * f(d(x))] = ∇[∇m(x) * f(d(x)) + m(x) * ∇f(d(x))]
         //                    = ∇²m(x) * f(d(x)) + ∇f(d(x)) * ∇m(x)ᵀ
         //                      + ∇m(x) * ∇f(d(x))ᵀ + m(x) * ∇²f(d(x))
-        hess = (w * f) * hess_m + grad_f_grad_m
-            + grad_f_grad_m.transpose()
+        hess = (w * f) * hess_m + grad_f_grad_m + grad_f_grad_m.transpose()
             + (weighted_m * hess_f) * grad_d * grad_d.transpose()
             + (weighted_m * grad_f) * hess_d;
     }
