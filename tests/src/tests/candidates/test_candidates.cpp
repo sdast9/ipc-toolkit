@@ -1,12 +1,13 @@
 #include <catch2/catch_test_macros.hpp>
 #include <catch2/generators/catch_generators.hpp>
 
+#include <ipc/broad_phase/brute_force.hpp>
 #include <ipc/candidates/candidates.hpp>
 #include <ipc/candidates/edge_face.hpp>
 #include <ipc/candidates/face_face.hpp>
 #include <ipc/candidates/plane_vertex.hpp>
+#include <ipc/math/constants.hpp>
 
-#include <igl/PI.h>
 #include <igl/edges.h>
 
 #include <algorithm>
@@ -189,8 +190,8 @@ TEST_CASE(
     "Candidate adjacency lists join candidate partners with mesh neighbors",
     "[candidates]")
 {
-    const double c = std::cos(2 * igl::PI / 3), s = std::sin(2 * igl::PI / 3);
-    const double r = std::cos(igl::PI / 3), q = std::sin(igl::PI / 3);
+    const double c = std::cos(2 * ipc::PI / 3), s = std::sin(2 * ipc::PI / 3);
+    const double r = std::cos(ipc::PI / 3), q = std::sin(ipc::PI / 3);
     Eigen::MatrixXd V(8, 3);
     V << 0, 0, 0.05, 1, 0, 1, c, s, 1, c, -s, 1, //
         0, 0, -0.05, r, q, -1, -1, 0, -1, r, -q, -1;
@@ -383,4 +384,136 @@ TEST_CASE(
     // Trajectory candidates never include the ESP-only types.
     candidates.build(mesh, V, V, /*inflation_radius=*/0.05);
     CHECK(!candidates.has_all_types);
+}
+
+// A segment followed by three loose points. The loose points are the mesh's
+// codimensional vertices, and because the segment's vertices come first, a
+// loose point's position among the codimensional vertices differs from its
+// vertex id.
+TEST_CASE(
+    "Collision filter applies to codimensional vertices by mesh vertex id",
+    "[candidates][codim][filter]")
+{
+    const int dim = GENERATE(2, 3);
+    const bool continuous = GENERATE(false, true);
+    CAPTURE(dim, continuous);
+
+    Eigen::MatrixXd V = Eigen::MatrixXd::Zero(5, dim);
+    V.row(0)(0) = -1; // segment from (-1, 0) to (1, 0)
+    V.row(1)(0) = 1;
+    V.row(2)(1) = 0.10; // loose points clustered just above its middle
+    V.row(3)(1) = 0.11;
+    V.row(4)(1) = 0.12;
+    Eigen::MatrixXi E(1, 2);
+    E << 0, 1;
+    CollisionMesh mesh(V, E, Eigen::MatrixXi(0, 3));
+    REQUIRE(mesh.num_codim_vertices() == 3);
+
+    const auto build = [&]() {
+        Candidates candidates;
+        if (continuous) {
+            candidates.build(mesh, V, V, /*inflation_radius=*/0.5);
+        } else {
+            candidates.build(mesh, V, /*inflation_radius=*/0.5);
+        }
+        return candidates;
+    };
+    const auto has_vv = [](const Candidates& candidates, index_t a, index_t b) {
+        return std::any_of(
+            candidates.vv_candidates.begin(), candidates.vv_candidates.end(),
+            [&](const VertexVertexCandidate& c) {
+                return (c.vertex0_id == a && c.vertex1_id == b)
+                    || (c.vertex0_id == b && c.vertex1_id == a);
+            });
+    };
+    const auto has_ev = [](const Candidates& candidates, index_t e, index_t v) {
+        return std::any_of(
+            candidates.ev_candidates.begin(), candidates.ev_candidates.end(),
+            [&](const EdgeVertexCandidate& c) {
+                return c.edge_id == e && c.vertex_id == v;
+            });
+    };
+
+    SECTION("Loose points that may not touch each other")
+    {
+        mesh.can_collide = [](size_t vi, size_t vj) {
+            return vi < 2 || vj < 2;
+        };
+        const Candidates candidates = build();
+        CHECK(candidates.vv_candidates.empty());
+        // The segment still sees every loose point.
+        CHECK(has_ev(candidates, 0, 2));
+        CHECK(has_ev(candidates, 0, 3));
+        CHECK(has_ev(candidates, 0, 4));
+    }
+
+    SECTION("One blocked pair of loose points")
+    {
+        mesh.can_collide = [](size_t vi, size_t vj) {
+            return std::minmax(vi, vj) != std::minmax<size_t>(3, 4);
+        };
+        const Candidates candidates = build();
+        CHECK(has_vv(candidates, 2, 3));
+        CHECK(has_vv(candidates, 2, 4));
+        CHECK_FALSE(has_vv(candidates, 3, 4));
+    }
+
+    SECTION("One loose point that may not touch the segment")
+    {
+        mesh.can_collide = [](size_t vi, size_t vj) {
+            return !(std::max(vi, vj) == 4 && std::min(vi, vj) < 2);
+        };
+        const Candidates candidates = build();
+        CHECK(has_ev(candidates, 0, 2));
+        CHECK(has_ev(candidates, 0, 3));
+        CHECK_FALSE(has_ev(candidates, 0, 4));
+    }
+}
+
+TEST_CASE(
+    "Codimensional passes restore the collision filter after a budget failure",
+    "[candidates][codim][filter][budget]")
+{
+    const int point_count = GENERATE(1, 3);
+    const bool continuous = GENERATE(false, true);
+    CAPTURE(point_count, continuous);
+
+    Eigen::MatrixXd V = Eigen::MatrixXd::Zero(2 + point_count, 3);
+    V(0, 0) = -1;
+    V(1, 0) = 1;
+    V.col(1).tail(point_count).setConstant(0.1);
+    Eigen::MatrixXi E(1, 2);
+    E << 0, 1;
+    const CollisionMesh mesh(V, E, Eigen::MatrixXi(0, 3));
+    REQUIRE(mesh.num_codim_edges() == 1);
+    REQUIRE(mesh.num_codim_vertices() == point_count);
+    REQUIRE(mesh.can_collide.accepts_all());
+
+    BruteForce broad_phase;
+    Candidates candidates;
+    const auto build = [&]() {
+        if (continuous) {
+            candidates.build(mesh, V, V, 0.5, &broad_phase);
+        } else {
+            candidates.build(mesh, V, 0.5, &broad_phase);
+        }
+    };
+
+    // One loose point fails in the edge-vertex pass (1 * 3 pairs).
+    // Three loose points fail earlier in the vertex-vertex pass (3 pairs).
+    broad_phase.budget.max_candidate_emissions = 1;
+    try {
+        build();
+        FAIL("expected a codimensional emission-budget exception");
+    } catch (const BroadPhaseBudgetExceeded& error) {
+        CHECK(error.quantity == "candidate_emissions");
+        CHECK(error.requested == 3);
+    }
+    CHECK(candidates.empty());
+    CHECK(broad_phase.can_vertices_collide.accepts_all());
+
+    broad_phase.budget.max_candidate_emissions = 5;
+    REQUIRE_NOTHROW(build());
+    CHECK(candidates.ev_candidates.size() == point_count);
+    CHECK(broad_phase.can_vertices_collide.accepts_all());
 }

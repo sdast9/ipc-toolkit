@@ -1,6 +1,8 @@
 set(SOURCES
   autodiff_types.hpp
   default_init_allocator.hpp
+  eigen_abi.cpp
+  eigen_abi.hpp
   eigen_ext.hpp
   eigen_ext.tpp
   gradient_assembler.hpp
@@ -16,9 +18,8 @@ set(SOURCES
   merge_thread_local.hpp
   profiler.cpp
   profiler.hpp
-  simd.hpp
-  save_obj.cpp
   save_obj.hpp
+  simd.hpp
   unordered_map_and_set.hpp
   vertex_to_min_edge.cpp
   vertex_to_min_edge.hpp

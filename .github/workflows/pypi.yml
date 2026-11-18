@@ -16,7 +16,7 @@ on:
       - '.github/workflows/pypi.yml'
       - 'python/tests/check_cuda_wheel.py'
       - 'python/tests/test_cuda.py'
-      - 'setup.py'
+      - 'python/CMakeLists.txt'
       - 'pyproject.toml'
 
 concurrency:
@@ -43,7 +43,7 @@ jobs:
         # windows-latest ships MSVC 19.5x (VS 2026), which CUDA 12.8 rejects, so
         # the Windows wheels build on the VS 2022 image.
         os: [ubuntu-latest, macos-latest, windows-2022]
-        python-version: [cp310, cp311, cp312, cp313, cp314]
+        python-version: [cp311, cp312, cp313, cp314, cp315]
         arch: [x86_64, arm64]
         exclude:
           - os: ubuntu-latest
@@ -78,10 +78,11 @@ jobs:
           method: 'network'
           use-github-cache: false
 
-      # setup.py builds with the Visual Studio generator by default, which needs
-      # the toolkit's MSBuild integration. We use Ninja instead, as cuda.yml
-      # does, so we need MSVC's environment on PATH. check_language(CUDA) does
-      # not reliably find nvcc on this runner, so we name it with CUDACXX.
+      # On Windows, scikit-build-core builds with the Visual Studio generator
+      # by default, which needs the toolkit's MSBuild integration. We use Ninja
+      # instead, as cuda.yml does, so we need MSVC's environment on PATH.
+      # check_language(CUDA) does not reliably find nvcc on this runner, so we
+      # name it with CUDACXX.
       - name: Setup MSVC (Windows)
         if: runner.os == 'Windows'
         uses: ilammy/msvc-dev-cmd@v1
@@ -95,7 +96,7 @@ jobs:
           "CUDACXX=$env:CUDA_PATH\bin\nvcc.exe" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Build wheels
-        uses: pypa/cibuildwheel@v4.1.0
+        uses: pypa/cibuildwheel@v4.3.5
         # to supply options, put them in 'env', like:
         env:
           MACOSX_DEPLOYMENT_TARGET: "11.0"

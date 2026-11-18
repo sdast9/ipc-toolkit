@@ -451,8 +451,28 @@ def drop_pybind11_bases():
     utils.find_inherited_attrs = find_without_pybind11_bases
 
 
+def generate_landscape(app):
+    """Regenerate the positioning figure embedded in about/why.rst.
+
+    The figure is inline SVG written by a small script, so editing its POINTS
+    list is all it takes to move a project. Running the script here means we
+    never have to remember to do it by hand, and the committed
+    `_static/landscape.html` cannot drift from the script.
+    """
+    import importlib.util
+
+    script = pathlib.Path(__file__).parent / "_static/img/about/generate_landscape.py"
+    spec = importlib.util.spec_from_file_location("generate_landscape", script)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    module.write()
+
+
 def setup(app):
     drop_pybind11_bases()
+
+    # Before Sphinx reads any sources, so `.. raw:: html :file:` sees the result.
+    app.connect("builder-inited", generate_landscape)
 
     if SHOW_PROGRESS:
         connect_progress(app)
@@ -505,3 +525,26 @@ def setup(app):
         lambda app, domain, objtype, content: remove_collaboration_graphs(app, content),
     )
     app.connect("doctree-read", remove_collaboration_graphs)
+
+    def wrap_tables(app, doctree):
+        """Put each hand-written table in a ``div.ipc-table``.
+
+        custom.css draws that div as the table's card. A table that fills the
+        column can't also scroll sideways, so we let the div do the scrolling
+        and keep the table at 100% of it: a table wider than the column (the
+        six-column dependency lists, say) then scrolls inside its card instead
+        of spilling past it. We leave autosummary member lists and the Rigid
+        IPC page's side-by-side comparisons alone, since they style
+        themselves.
+        """
+        from docutils import nodes
+
+        skip = {"autosummary", "rigid-ipc-versus"}
+        for table in list(doctree.findall(nodes.table)):
+            if skip & set(table["classes"]):
+                continue
+            wrapper = nodes.container(classes=["ipc-table"])
+            table.replace_self(wrapper)
+            wrapper += table
+
+    app.connect("doctree-read", wrap_tables)

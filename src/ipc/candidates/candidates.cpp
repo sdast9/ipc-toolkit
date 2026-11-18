@@ -11,10 +11,10 @@
 #include <ipc/distance/point_line.hpp>
 #include <ipc/distance/point_plane.hpp>
 #include <ipc/distance/point_point.hpp>
+#include <ipc/io/write_candidates_obj.hpp>
 #include <ipc/utils/eigen_ext.hpp>
 #include <ipc/utils/logger.hpp>
 #include <ipc/utils/profiler.hpp>
-#include <ipc/utils/save_obj.hpp>
 
 #include <igl/remove_unreferenced.h>
 #include <tbb/blocked_range.h>
@@ -28,10 +28,31 @@
 #include <cassert>
 #include <fstream>
 #include <numeric>
+#include <utility>
 
 namespace ipc {
 
 namespace {
+    // The codimensional filters borrow index maps local to their pass.
+    // Restore the original filter even when a build or detection throws.
+    class ScopedCollisionFilter {
+    public:
+        ScopedCollisionFilter(CollisionFilter& target, CollisionFilter filter)
+            : m_target(target)
+            , m_previous(std::exchange(target, std::move(filter)))
+        {
+        }
+
+        ~ScopedCollisionFilter() { m_target = std::move(m_previous); }
+
+        ScopedCollisionFilter(const ScopedCollisionFilter&) = delete;
+        ScopedCollisionFilter& operator=(const ScopedCollisionFilter&) = delete;
+
+    private:
+        CollisionFilter& m_target;
+        CollisionFilter m_previous;
+    };
+
     // Candidates::build runs up to three broad-phase builds (the main pass
     // and the codimensional passes), each of which resets the broad phase's
     // statistics: sum them so the caller sees the whole candidate build.
@@ -174,6 +195,16 @@ void Candidates::build_unchecked(
             mesh.has_thickness() ? box_thickness(mesh.codim_vertices())
                                  : Eigen::VectorXd());
 
+        // This broad phase only holds the codim. vertices, so it reports
+        // (and filters) pairs by their index within that subset. The mesh's
+        // filter expects mesh vertex ids, so we translate before asking it.
+        // Without this, a filter is applied to the wrong vertices: it lets
+        // through pairs it should block and blocks pairs it should allow.
+        const ScopedCollisionFilter filter(
+            broad_phase->can_vertices_collide, [&mesh](size_t vi, size_t vj) {
+                return mesh.can_collide(
+                    mesh.codim_vertices()[vi], mesh.codim_vertices()[vj]);
+            });
         broad_phase->detect_vertex_vertex_candidates(vv_candidates);
         accumulate_statistics(statistics, *broad_phase);
         for (auto& [vi, vj] : vv_candidates) {
@@ -217,9 +248,22 @@ void Candidates::build_unchecked(
 
         // TODO: Can we reuse the broad phase from above?
         broad_phase->clear();
-        // Ignore c-edge to c-edge and c-vertex to c-vertex
-        broad_phase->can_vertices_collide =
-            make_codim_cross_filter(nCV) & mesh.can_collide;
+        // Ignore c-edge to c-edge and c-vertex to c-vertex. As in the
+        // codim. vertex pass above, this broad phase indexes its own vertex
+        // list (the codim. vertices, then the codim. edges' vertices), so we
+        // translate to mesh vertex ids before asking the mesh's filter.
+        const auto to_mesh_vertex = [&mesh, &J, nCV](size_t v) {
+            return v < nCV ? size_t(mesh.codim_vertices()[v])
+                           : size_t(J[v - nCV]);
+        };
+        const ScopedCollisionFilter filter(
+            broad_phase->can_vertices_collide,
+            make_codim_cross_filter(nCV)
+                & CollisionFilter(
+                    [&mesh, to_mesh_vertex](size_t vi, size_t vj) {
+                        return mesh.can_collide(
+                            to_mesh_vertex(vi), to_mesh_vertex(vj));
+                    }));
         build_broad_phase(V, CE, Eigen::MatrixXi(), V_thickness);
 
         broad_phase->detect_edge_vertex_candidates(ev_candidates);
@@ -314,6 +358,16 @@ void Candidates::build_unchecked(
             mesh.has_thickness() ? box_thickness(mesh.codim_vertices())
                                  : Eigen::VectorXd());
 
+        // This broad phase only holds the codim. vertices, so it reports
+        // (and filters) pairs by their index within that subset. The mesh's
+        // filter expects mesh vertex ids, so we translate before asking it.
+        // Without this, a filter is applied to the wrong vertices: it lets
+        // through pairs it should block and blocks pairs it should allow.
+        const ScopedCollisionFilter filter(
+            broad_phase->can_vertices_collide, [&mesh](size_t vi, size_t vj) {
+                return mesh.can_collide(
+                    mesh.codim_vertices()[vi], mesh.codim_vertices()[vj]);
+            });
         broad_phase->detect_vertex_vertex_candidates(vv_candidates);
         accumulate_statistics(statistics, *broad_phase);
         for (auto& [vi, vj] : vv_candidates) {
@@ -362,9 +416,22 @@ void Candidates::build_unchecked(
 
         // TODO: Can we reuse the broad phase from above?
         broad_phase->clear();
-        // Ignore c-edge to c-edge and c-vertex to c-vertex
-        broad_phase->can_vertices_collide =
-            make_codim_cross_filter(nCV) & mesh.can_collide;
+        // Ignore c-edge to c-edge and c-vertex to c-vertex. As in the
+        // codim. vertex pass above, this broad phase indexes its own vertex
+        // list (the codim. vertices, then the codim. edges' vertices), so we
+        // translate to mesh vertex ids before asking the mesh's filter.
+        const auto to_mesh_vertex = [&mesh, &J, nCV](size_t v) {
+            return v < nCV ? size_t(mesh.codim_vertices()[v])
+                           : size_t(J[v - nCV]);
+        };
+        const ScopedCollisionFilter filter(
+            broad_phase->can_vertices_collide,
+            make_codim_cross_filter(nCV)
+                & CollisionFilter(
+                    [&mesh, to_mesh_vertex](size_t vi, size_t vj) {
+                        return mesh.can_collide(
+                            to_mesh_vertex(vi), to_mesh_vertex(vj));
+                    }));
         build_broad_phase(V_t0, V_t1, CE, Eigen::MatrixXi(), V_thickness);
 
         broad_phase->detect_edge_vertex_candidates(ev_candidates);
@@ -844,7 +911,7 @@ CandidateVector<EdgeVertexCandidate> Candidates::edge_edge_to_edge_vertex(
 
 // ============================================================================
 
-bool Candidates::save_obj(
+bool Candidates::write_obj(
     const std::string& filename,
     Eigen::ConstRef<Eigen::MatrixXd> vertices,
     Eigen::ConstRef<Eigen::MatrixXi> edges,
@@ -855,13 +922,17 @@ bool Candidates::save_obj(
         return false;
     }
     int v_offset = 0;
-    ipc::save_obj(obj, vertices, edges, faces, vv_candidates, v_offset);
+    ipc::write_candidates_obj(
+        obj, vertices, edges, faces, vv_candidates, v_offset);
     v_offset += vv_candidates.size() * 2;
-    ipc::save_obj(obj, vertices, edges, faces, ev_candidates, v_offset);
+    ipc::write_candidates_obj(
+        obj, vertices, edges, faces, ev_candidates, v_offset);
     v_offset += ev_candidates.size() * 3;
-    ipc::save_obj(obj, vertices, edges, faces, ee_candidates, v_offset);
+    ipc::write_candidates_obj(
+        obj, vertices, edges, faces, ee_candidates, v_offset);
     v_offset += ee_candidates.size() * 4;
-    ipc::save_obj(obj, vertices, faces, faces, fv_candidates, v_offset);
+    ipc::write_candidates_obj(
+        obj, vertices, faces, faces, fv_candidates, v_offset);
     return true;
 }
 
