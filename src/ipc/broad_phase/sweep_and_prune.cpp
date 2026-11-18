@@ -1,5 +1,7 @@
 #include "sweep_and_prune.hpp"
 
+#include <ipc/candidates/candidate_vector.hpp>
+
 #include <scalable_ccd/broad_phase/aabb.hpp>
 #include <scalable_ccd/broad_phase/sort_and_sweep.hpp>
 
@@ -103,7 +105,7 @@ void SweepAndPrune::clear()
 }
 
 void SweepAndPrune::detect_vertex_vertex_candidates(
-    std::vector<VertexVertexCandidate>& candidates) const
+    CandidateVector<VertexVertexCandidate>& candidates) const
 {
     candidates.clear();
     std::vector<std::pair<int, int>> overlaps;
@@ -117,7 +119,7 @@ void SweepAndPrune::detect_vertex_vertex_candidates(
 }
 
 void SweepAndPrune::detect_edge_vertex_candidates(
-    std::vector<EdgeVertexCandidate>& candidates) const
+    CandidateVector<EdgeVertexCandidate>& candidates) const
 {
     candidates.clear();
     std::vector<std::pair<int, int>> overlaps;
@@ -132,7 +134,7 @@ void SweepAndPrune::detect_edge_vertex_candidates(
 }
 
 void SweepAndPrune::detect_edge_edge_candidates(
-    std::vector<EdgeEdgeCandidate>& candidates) const
+    CandidateVector<EdgeEdgeCandidate>& candidates) const
 {
     candidates.clear();
     std::vector<std::pair<int, int>> overlaps;
@@ -146,7 +148,7 @@ void SweepAndPrune::detect_edge_edge_candidates(
 }
 
 void SweepAndPrune::detect_face_vertex_candidates(
-    std::vector<FaceVertexCandidate>& candidates) const
+    CandidateVector<FaceVertexCandidate>& candidates) const
 {
     candidates.clear();
     std::vector<std::pair<int, int>> overlaps;
@@ -161,7 +163,7 @@ void SweepAndPrune::detect_face_vertex_candidates(
 }
 
 void SweepAndPrune::detect_edge_face_candidates(
-    std::vector<EdgeFaceCandidate>& candidates) const
+    CandidateVector<EdgeFaceCandidate>& candidates) const
 {
     candidates.clear();
     std::vector<std::pair<int, int>> overlaps;
@@ -176,7 +178,7 @@ void SweepAndPrune::detect_edge_face_candidates(
 }
 
 void SweepAndPrune::detect_face_face_candidates(
-    std::vector<FaceFaceCandidate>& candidates) const
+    CandidateVector<FaceFaceCandidate>& candidates) const
 {
     candidates.clear();
     std::vector<std::pair<int, int>> overlaps;

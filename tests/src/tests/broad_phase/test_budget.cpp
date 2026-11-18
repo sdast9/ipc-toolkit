@@ -251,9 +251,12 @@ TEST_CASE(
         candidates.build(mesh, V0, V1, inflation, &grid);
         CHECK(candidates.size() == reference.size());
         std::vector<std::array<index_t, 4>> a, b;
+        const auto ids = [&](const auto& candidate) {
+            return candidate.vertex_ids(E, F);
+        };
         for (size_t i = 0; i < candidates.size(); ++i) {
-            a.push_back(candidates[i].vertex_ids(E, F));
-            b.push_back(reference[i].vertex_ids(E, F));
+            a.push_back(candidates.visit(i, ids));
+            b.push_back(reference.visit(i, ids));
         }
         CHECK(a == b);
     }

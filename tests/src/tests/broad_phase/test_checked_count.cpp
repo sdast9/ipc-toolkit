@@ -8,6 +8,7 @@
 #include <ipc/broad_phase/brute_force.hpp>
 #include <ipc/broad_phase/checked_count.hpp>
 #include <ipc/broad_phase/hash_grid.hpp>
+#include <ipc/candidates/candidate_vector.hpp>
 #include <ipc/candidates/candidates.hpp>
 #include <ipc/collision_mesh.hpp>
 
@@ -400,7 +401,7 @@ TEST_CASE(
     // Single set: keys 7 (4 items) and 9 (3 items): 6 + 3 = 9 pairs.
     probe.set_items({ { 7, 4 }, { 9, 3 } }, {});
     probe.budget.max_candidate_emissions = 9;
-    std::vector<VertexVertexCandidate> vv;
+    CandidateVector<VertexVertexCandidate> vv;
     CHECK_NOTHROW(probe.detect_vertex_vertex_candidates(vv));
     CHECK(vv.empty()); // disjoint boxes
     CHECK(probe.build_statistics().candidate_emissions == 9);
@@ -418,7 +419,7 @@ TEST_CASE(
     // x 5.
     probe.set_items({ { 7, 4 }, { 9, 3 } }, { { 7, 2 }, { 11, 5 } });
     probe.budget.max_candidate_emissions = 8;
-    std::vector<EdgeVertexCandidate> ev;
+    CandidateVector<EdgeVertexCandidate> ev;
     CHECK_NOTHROW(probe.detect_edge_vertex_candidates(ev));
     CHECK(ev.empty());
     CHECK(probe.build_statistics().candidate_emissions == 8);
@@ -553,7 +554,7 @@ TEST_CASE(
     }
     // The grid is usable afterwards.
     CHECK_NOTHROW(grid.build(V, E, F, 1e-3));
-    std::vector<EdgeVertexCandidate> ev;
+    CandidateVector<EdgeVertexCandidate> ev;
     grid.detect_edge_vertex_candidates(ev);
     // Edges 1-2 and 2-3 both reach vertex 0's box; edge 0-1 reaches none.
     CHECK(ev.size() == 2);
@@ -628,8 +629,8 @@ TEST_CASE(
     BruteForce bf;
     bf.budget.max_candidate_emissions = 12;
     bf.build(V, E, F, 1e-3);
-    std::vector<EdgeEdgeCandidate> ee;
-    std::vector<EdgeVertexCandidate> ev;
+    CandidateVector<EdgeEdgeCandidate> ee;
+    CandidateVector<EdgeVertexCandidate> ev;
     CHECK_NOTHROW(bf.detect_edge_edge_candidates(ee));
     CHECK(bf.build_statistics().candidate_emissions == 3);
     CHECK_NOTHROW(bf.detect_edge_vertex_candidates(ev));
