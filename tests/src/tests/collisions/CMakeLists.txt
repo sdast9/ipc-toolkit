@@ -4,6 +4,7 @@ set(SOURCES
   test_parent_contributions.cpp
   test_obstacles.cpp
   test_plane_vertex_collisions.cpp
+  test_thickness.cpp
 
   # Benchmarks
 
